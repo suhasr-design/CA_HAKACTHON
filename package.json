@@ -1,0 +1,29 @@
+{
+  "name": "fair-tickets",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "chain": "hardhat node --hostname 0.0.0.0",
+    "mobile": "npm --prefix mobile start",
+    "deploy:local": "hardhat run scripts/deploy-local.js --network localhost",
+    "demo:fastforward": "hardhat run scripts/demo-fastforward.js --network localhost",
+    "simulate": "node scripts/simulate-bots.js",
+    "check:bot": "hardhat run scripts/check-bot.js --network localhost",
+    "app": "npm --prefix app run dev"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@anon-aadhaar/contracts": "^2.4.3",
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "@openzeppelin/merkle-tree": "^1.0.8",
+    "hardhat": "^2.29.2"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.1.0"
+  }
+}

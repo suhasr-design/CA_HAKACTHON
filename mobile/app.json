@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Fair Tickets",
+    "slug": "fair-tickets",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0C0A1D",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.chiparchitects.fairtickets",
+      "adaptiveIcon": {
+        "backgroundColor": "#0C0A1D",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
