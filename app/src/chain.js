@@ -29,9 +29,19 @@ const wallets = NAMES.map((_, i) => root.deriveChild(i).connect(provider));
 export const wallet = (i) => wallets[i];
 export const addressOf = (i) => wallets[i].address;
 export const indexOf = (addr) => wallets.findIndex((w) => w.address.toLowerCase() === String(addr).toLowerCase());
+
+// Labelled synthetic crowd (keys from Hardhat's public test mnemonic, local test ETH only).
+export const CROWD = (deployment.crowd || []).map((c) => ({ ...c, lower: c.address.toLowerCase() }));
+const crowdByAddr = new Map(CROWD.map((c) => [c.lower, c]));
+export const crowdWallet = (c) => new ethers.Wallet(c.key, provider);
+export const isCrowd = (addr) => crowdByAddr.has(String(addr).toLowerCase());
+export const EVENT = deployment.event || {};
+
 export const nameOf = (addr) => {
   const i = indexOf(addr);
-  return i >= 0 ? NAMES[i] : short(addr);
+  if (i >= 0) return NAMES[i];
+  const c = crowdByAddr.get(String(addr).toLowerCase());
+  return c ? c.name : short(addr);
 };
 export const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");
 
@@ -109,8 +119,8 @@ async function registrationKinds(ft) {
       if (!regKindCache.has(e.transactionHash)) {
         const tx = await provider.getTransaction(e.transactionHash);
         const parsed = ft.interface.parseTransaction({ data: tx.data });
-        const proof = parsed.args.groth16Proof;
-        regKindCache.set(e.transactionHash, proof.every((x) => x === 0n) ? "synthetic" : "zk");
+        if (parsed.name === "assistedRegister") regKindCache.set(e.transactionHash, "assisted");
+        else regKindCache.set(e.transactionHash, parsed.args.groth16Proof.every((x) => x === 0n) ? "synthetic" : "zk");
       }
       out[fan] = regKindCache.get(e.transactionHash);
     })
@@ -125,12 +135,13 @@ export async function loadState() {
   const [
     eventName, phase, facePrice, publicSeats, sponsorSeats, holdSeats, inventoryRoot,
     regCloses, claimDeadline, buybackDeadline, randomSeed, shuffledUpTo, nextTokenId,
-    nextWaitlistIndex, winnerCount, organiserBalance, entrants, block, regs,
+    nextWaitlistIndex, winnerCount, organiserBalance, entrants, block, regs, assistedCap, assistedCount,
   ] = await Promise.all([
     ft.eventName(), ft.phase(), ft.facePrice(), ft.publicSeats(), ft.sponsorSeats(), ft.holdSeats(),
     ft.inventoryRoot(), ft.registrationClosesAt(), ft.claimDeadline(), ft.buybackDeadline(),
     ft.randomSeed(), ft.shuffledUpTo(), ft.nextTokenId(), ft.nextWaitlistIndex(), ft.winnerCount(),
     ft.organiserBalance(), ft.getEntrants(), provider.getBlock("latest"), registrationKinds(ft),
+    ft.assistedCap(), ft.assistedCount(),
   ]);
 
   const seatIdx = [...Array(Number(publicSeats)).keys()];
@@ -156,6 +167,7 @@ export async function loadState() {
     winnerCount: Number(winnerCount), organiserBalance, entrants: [...entrants], chainTime: block.timestamp,
     blockNumber: block.number,
     regKinds: regs.kinds, registrationOrder: regs.registrationOrder,
+    assistedCap: Number(assistedCap), assistedCount: Number(assistedCount),
     offers: offers.map((o, seat) => ({ seat, fan: o.fan, deadline: Number(o.deadline), seller: o.seller, tokenId: Number(o.tokenId), active: o.active })),
     seatIssued, seatLabels, tickets,
   };

@@ -5,15 +5,15 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
-    "backgroundColor": "#0C0A1D",
+    "userInterfaceStyle": "light",
+    "backgroundColor": "#F5F7FB",
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "package": "com.chiparchitects.fairtickets",
       "adaptiveIcon": {
-        "backgroundColor": "#0C0A1D",
+        "backgroundColor": "#F5F7FB",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -30,7 +30,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "extra": {
       "defaultHost": "192.168.8.97",

@@ -63,6 +63,8 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
     address[] internal _entrants;
     mapping(uint256 => bool) public nullifierUsed;
     mapping(address => bool) public isRegistered;
+    uint32 public assistedCap;     // public quota for the in-person ID desk
+    uint32 public assistedCount;
 
     // Lottery
     uint256 public randomSeed;
@@ -94,6 +96,7 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
     event InventoryCommitted(bytes32 root, uint32 publicSeats, uint32 sponsorSeats, uint32 holdSeats);
     event RegistrationOpened(uint64 closesAt, uint64 buybackDeadline);
     event Registered(address indexed fan, uint256 indexed nullifier, uint256 entryNumber);
+    event AssistedRegistered(address indexed fan, bytes32 docHash);
     event RandomnessReceived(uint256 seed);
     event ShuffleProgress(uint256 shuffledUpTo, uint256 total);
     event SaleOpened(uint64 claimDeadline);
@@ -207,10 +210,34 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
             valid = false;
         }
         require(valid, "Invalid Anon Aadhaar proof");
+        _addEntrant(msg.sender, nullifier);
+    }
+
+    /// @notice Organiser sets the public quota for the assisted desk (fans without Aadhaar:
+    /// foreign visitors, minors with a guardian). Fixed before registration opens.
+    function setAssistedCap(uint32 cap) external onlyOwner inPhase(Phase.Setup) {
+        assistedCap = cap;
+    }
+
+    /// @notice Assisted desk: staff checked a passport / other ID in person. Only a hash of the
+    /// document is stored. Capped and publicly counted, so it can't become a back door, and the
+    /// same document can't register twice.
+    function assistedRegister(address fan, bytes32 docHash) external onlyOwner inPhase(Phase.Registration) {
+        require(block.timestamp < registrationClosesAt, "Registration closed");
+        require(assistedCount < assistedCap, "Assisted quota full");
+        require(!isRegistered[fan], "Wallet already registered");
+        uint256 n = uint256(keccak256(abi.encode("assisted", docHash)));
+        require(!nullifierUsed[n], "This person is already registered");
+        assistedCount++;
+        _addEntrant(fan, n);
+        emit AssistedRegistered(fan, docHash);
+    }
+
+    function _addEntrant(address fan, uint256 nullifier) private {
         nullifierUsed[nullifier] = true;
-        isRegistered[msg.sender] = true;
-        _entrants.push(msg.sender);
-        emit Registered(msg.sender, nullifier, _entrants.length);
+        isRegistered[fan] = true;
+        _entrants.push(fan);
+        emit Registered(fan, nullifier, _entrants.length);
     }
 
     // ====================================================== 3. Lottery

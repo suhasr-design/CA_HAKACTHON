@@ -1,6 +1,30 @@
 // Presenter notes shown on screen when "Presenter notes" is switched on.
 // shows = what the section shows; say = a line to say to the judges.
 export const EXPLAIN = {
+  "home-101": {
+    shows: "Live answer to “if 101 people want 100 seats, who gets in?”: everyone in the window gets the same chance, the list is shuffled by a seed produced after it was frozen, positions 1–100 win and #101 is waitlist #1.",
+    say: "Speed doesn’t matter, so bots gain nothing. Person 101 isn’t rejected: they’re first in line for the first returned seat, at face value, and anyone can recompute the order.",
+  },
+  "org-create": {
+    shows: "The organiser enters the real event: name, venue, date, ₹ price and seat counts. A new contract is deployed with that seat list locked.",
+    say: "Seat counts, sponsor seats and artist holds are declared up front and locked on-chain. Nothing can be hidden for touts later.",
+  },
+  "org-assisted": {
+    shows: "In-person ID desk for fans without Aadhaar (foreign visitors, minors). Staff check a passport; only a hash goes on-chain. The quota is fixed before the sale and counted publicly.",
+    say: "This closes the gap for people Aadhaar doesn’t cover, without opening a back door: the quota is public and the same document can’t register twice.",
+  },
+  "gate-code": {
+    shows: "Each gate shows a code that changes every 20 seconds. The fan’s QR must be signed for that exact code, so it can’t be prepared earlier, screenshotted or relayed from far away in time.",
+    say: "This fixes relay attacks and phone-clock problems: the gate trusts its own clock, not the phone’s.",
+  },
+  "gate-sync": {
+    shows: "All gates check and mark tickets in one shared entry list over the venue LAN, so a ticket used at Gate A is rejected at Gate B. If the LAN drops, each gate keeps working from its own list.",
+    say: "This fixes duplicate entry across gates, which offline-only scanners can’t catch.",
+  },
+  "gate-desk": {
+    shows: "Help desk for a dead or lost phone, and random identity spot-checks. The fan re-proves with Aadhaar; the new proof must give the same anonymous code (nullifier) as at registration.",
+    say: "Someone who bought a phone or wallet from a tout fails this check: they can’t produce the original owner’s Aadhaar.",
+  },
   "home-hero": {
     shows: "The live event, read straight from the blockchain: how many people registered, seats, tickets issued and the waitlist.",
     say: "Every number on this page comes from the smart contract, not from our server, so anyone can check it.",

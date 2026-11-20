@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
-  NAMES, addressOf, deployment, eth, fairTickets, fastForward, fmtLeft, fmtTime, inventorySeats, isSyntheticAccount,
-  nameOf, revealArgs, short, syntheticProof, verifyDraw, vrf, wallet,
+  CROWD, EVENT, NAMES, addressOf, crowdWallet, deployment, errorText, eth, fairTickets, fastForward, fmtLeft, fmtTime,
+  inventorySeats, isCrowd, isSyntheticAccount, nameOf, revealArgs, short, syntheticProof, verifyDraw, vrf, wallet,
 } from "../chain";
 import { ethers } from "ethers";
 import { Avatar, Card, Explain, KindBadge, Stat } from "../ui.jsx";
@@ -22,20 +22,44 @@ export default function Organiser({ state, run, log }) {
 
   const batch = async (fn) => { setBusy(true); try { await fn(); } finally { setBusy(false); } };
 
-  const crowd = () => batch(async () => {
-    for (const i of deployment.syntheticAccounts || []) {
-      if (state.entrants.includes(addressOf(i))) continue;
-      const p = syntheticProof(NAMES[i]);
-      await run(`${NAMES[i]} joined (synthetic)`, () => fairTickets(wallet(i)).register(p.nullifier, p.timestamp, p.revealArray, p.groth16Proof), { quiet: true });
+  // Labelled synthetic crowd: named demo fans + the generated crowd. Each fan sends from its own
+  // wallet, so they can go in parallel batches.
+  const crowdMembers = [
+    ...(deployment.syntheticAccounts || []).map((i) => ({ name: NAMES[i], signer: () => wallet(i), address: addressOf(i) })),
+    ...CROWD.map((c) => ({ name: c.name, signer: () => crowdWallet(c), address: c.address })),
+  ];
+  const parallel = async (items, fn, size = 20) => {
+    let ok = 0;
+    for (let k = 0; k < items.length; k += size) {
+      const res = await Promise.allSettled(items.slice(k, k + size).map(async (x) => { const tx = await fn(x); await tx.wait(); }));
+      ok += res.filter((r) => r.status === "fulfilled").length;
     }
+    return ok;
+  };
+  const crowd = () => batch(async () => {
+    const todo = crowdMembers.filter((m) => !state.entrants.includes(m.address));
+    await run(`Synthetic crowd registered`, async () => {
+      const ok = await parallel(todo, (m) => {
+        const p = syntheticProof(m.name);
+        return fairTickets(m.signer()).register(p.nullifier, p.timestamp, p.revealArray, p.groth16Proof);
+      });
+      if (ok < todo.length) throw new Error(`${todo.length - ok} of ${todo.length} failed`);
+    });
   });
+  const syntheticWinners = state.phase === 4
+    ? [...Array(state.winnerCount).keys()].filter((p) => !state.seatIssued[p] && state.seatLabels[p] && crowdMembers.some((m) => m.address === state.entrants[p]))
+    : [];
+  const claimSynthetic = () => batch(() => run(`${syntheticWinners.length} synthetic winners paid and claimed`, async () => {
+    const byAddr = new Map(crowdMembers.map((m) => [m.address, m]));
+    await parallel(syntheticWinners, (p) => fairTickets(byAddr.get(state.entrants[p]).signer()).claimTicket(p, { value: state.facePrice }));
+  }));
 
   // The single "next action" for the current state of the sale.
   let next = null;
   if (state.phase === 1 && now < state.regCloses) {
     next = { title: "Registration is open", body: `Fans are registering. It closes in ${fmtLeft(state.regCloses - now)}. Add the synthetic crowd, let a real fan prove live, then jump the clock.`,
       actions: [
-        { label: `Add synthetic crowd (${(deployment.syntheticAccounts || []).length})`, fn: crowd },
+        { label: `Add synthetic crowd (${crowdMembers.filter((m) => !state.entrants.includes(m.address)).length})`, fn: crowd },
         { label: "⏩ Close registration now", fn: () => run("Registration closed (clock moved to closing time)", () => fastForward(state.regCloses - now + 60)), ghost: true },
       ] };
   } else if (state.phase === 1) {
@@ -52,7 +76,10 @@ export default function Organiser({ state, run, log }) {
       actions: [{ label: `Reveal ${unrevealed.length} seats`, fn: () => run(`${unrevealed.length} seats revealed and proven`, () => ft.revealSeats(...revealArgs(unrevealed))) }] };
   } else if (now <= state.claimDeadline) {
     next = { title: "Winners are claiming", body: `Winners pay face value in the fan app. The claim window closes in ${fmtLeft(state.claimDeadline - now)}.`,
-      actions: [{ label: "⏩ End claim window (+25 h)", fn: () => run("Clock moved forward 25 h", () => fastForward(25 * 3600)), ghost: true }] };
+      actions: [
+        ...(syntheticWinners.length ? [{ label: `Synthetic winners pay (${syntheticWinners.length})`, fn: claimSynthetic }] : []),
+        { label: "⏩ End claim window (+25 h)", fn: () => run("Clock moved forward 25 h", () => fastForward(25 * 3600)), ghost: true },
+      ] };
   } else if (unclaimed.length || expired.length) {
     next = { title: "Pass unused seats to the waitlist", body: "Unclaimed seats and expired offers move to the next verified fan in line.",
       actions: [
@@ -105,14 +132,21 @@ export default function Organiser({ state, run, log }) {
           </div>
           <div className="row">
             <button className="btn sm" disabled={state.organiserBalance === 0n} onClick={() => run("Proceeds withdrawn", () => ft.withdrawProceeds())}>Withdraw proceeds</button>
-            <button className="btn sm" onClick={() => {
+            <button className="btn sm" onClick={async () => {
+              // Merged entry list from all gates (venue LAN), hashed and anchored on-chain after the event.
               let scans = {};
-              try { scans = JSON.parse(localStorage.getItem(`ft-scanned:${deployment.fairTickets}`) || "{}"); } catch {}
-              const h = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(scans)));
-              run(`Gate scan log anchored (${Object.keys(scans).length} entries)`, () => ft.submitScanLog(h, Object.keys(scans).length));
+              try { scans = await (await fetch(`/api/gate/scans?contract=${deployment.fairTickets}`)).json(); } catch {}
+              const sorted = Object.keys(scans).sort((a, b) => a - b).map((k) => [k, scans[k]]);
+              const h = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(sorted)));
+              run(`Gate log anchored (${sorted.length} entries, all gates)`, () => ft.submitScanLog(h, sorted.length));
             }}>Anchor gate log</button>
           </div>
         </Card>
+      </div>
+
+      <div className="grid-2">
+        <CreateEvent />
+        <AssistedDesk state={state} ft={ft} run={run} />
       </div>
 
       <Card title="Live seat map" icon="▦" explain="org-seatmap" right={<Legend />}>
@@ -122,6 +156,14 @@ export default function Organiser({ state, run, log }) {
       <Card title="Lottery board" icon="🎲" explain="org-lottery" right={state.phase === 4 && (
         <button className="btn sm" onClick={() => setCheck(verifyDraw(state.randomSeed, state.registrationOrder, state.entrants))}>Verify the draw independently</button>
       )}>
+        {state.entrants.length > 0 && (
+          <p className="small">
+            <b>{state.entrants.length}</b> verified people for <b>{state.publicSeats}</b> seats.{" "}
+            {state.entrants.length > state.publicSeats
+              ? <>After the shuffle, positions 1–{state.publicSeats} win; person #{state.publicSeats + 1} is <b>waitlist #1</b> and gets the first returned seat. <span className="muted">({state.entrants.length - state.publicSeats} on the waitlist.)</span></>
+              : <>Everyone gets a seat.</>}
+          </p>
+        )}
         {state.phase >= 3 && <div className="seed">VRF seed <span className="mono">{state.randomSeed.toString().slice(0, 30)}…</span></div>}
         {check && (
           <div className={`verify ${check.match ? "ok" : "bad"}`}>
@@ -161,6 +203,85 @@ export default function Organiser({ state, run, log }) {
         )}
       </Card>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- create a real event
+function CreateEvent() {
+  const [f, setF] = useState({
+    title: EVENT.title || "", venue: EVENT.venue || "", startsAt: (EVENT.startsAt || "").slice(0, 16),
+    priceInr: EVENT.priceInr ?? 4500, priceEth: EVENT.priceEth || "0.05",
+    publicSeats: EVENT.publicSeats ?? 100, sponsorSeats: EVENT.sponsorSeats ?? 10, holdSeats: EVENT.holdSeats ?? 5,
+    assistedCap: EVENT.assistedCap ?? 5, registrationMinutes: 120, crowd: (deployment.crowd || []).length || 120,
+  });
+  const [status, setStatus] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF((x) => ({ ...x, [k]: e.target.value }));
+  const create = async () => {
+    if (!confirm("Create this event? It replaces the current demo event (new contract, fresh registrations).")) return;
+    setBusy(true);
+    setStatus("Deploying the event contract and locking the seat list… (about 30 s)");
+    try {
+      const body = { ...f, startsAt: f.startsAt ? `${f.startsAt}:00+05:30` : "" };
+      const r = await fetch("/api/events", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      setStatus("✓ Event created. Reloading…");
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) {
+      setStatus(`✕ ${e.message}`);
+      setBusy(false);
+    }
+  };
+  return (
+    <Card title="Create an event" icon="＋" explain="org-create">
+      <div className="form-grid">
+        <label className="wide">Event name<input value={f.title} onChange={set("title")} placeholder="Artist / match / event" /></label>
+        <label className="two">Venue<input value={f.venue} onChange={set("venue")} placeholder="Stadium, city" /></label>
+        <label>Date & time (IST)<input type="datetime-local" value={f.startsAt} onChange={set("startsAt")} /></label>
+        <label>Price (₹)<input type="number" min="0" value={f.priceInr} onChange={set("priceInr")} /></label>
+        <label>Demo chain price (ETH)<input value={f.priceEth} onChange={set("priceEth")} /></label>
+        <label>Registration (minutes)<input type="number" min="2" value={f.registrationMinutes} onChange={set("registrationMinutes")} /></label>
+        <label>Public seats<input type="number" min="1" max="500" value={f.publicSeats} onChange={set("publicSeats")} /></label>
+        <label>Sponsor seats<input type="number" min="0" value={f.sponsorSeats} onChange={set("sponsorSeats")} /></label>
+        <label>Artist holds<input type="number" min="0" value={f.holdSeats} onChange={set("holdSeats")} /></label>
+        <label>ID-desk quota<input type="number" min="0" value={f.assistedCap} onChange={set("assistedCap")} /></label>
+        <label className="two">Synthetic crowd (labelled demo fans)<input type="number" min="0" max="300" value={f.crowd} onChange={set("crowd")} /></label>
+      </div>
+      <div className="row">
+        <button className="btn primary" disabled={busy || !f.title} onClick={create}>{busy ? "Creating…" : "Create event"}</button>
+        <span className="small muted">{status || "Only from the organiser laptop. Sponsor seats and holds are declared publicly."}</span>
+      </div>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------- assisted ID desk
+function AssistedDesk({ state, ft, run }) {
+  const [fan, setFan] = useState("");
+  const [docType, setDocType] = useState("Passport");
+  const [docNo, setDocNo] = useState("");
+  const open = state.phase === 1 && state.chainTime < state.regCloses;
+  const full = state.assistedCount >= state.assistedCap;
+  const valid = /^0x[0-9a-fA-F]{40}$/.test(fan.trim()) && docNo.trim().length >= 5;
+  const submit = () => {
+    // Only a salted hash of the document is stored: the same document can't register twice.
+    const docHash = ethers.keccak256(ethers.toUtf8Bytes(`${docType}|${docNo.trim().toUpperCase()}|${deployment.nullifierSeed}`));
+    run(`${short(fan.trim())} registered at the ID desk`, () => ft.assistedRegister(fan.trim(), docHash)).then((ok) => ok && (setFan(""), setDocNo("")));
+  };
+  return (
+    <Card title="Assisted ID desk" icon="🛂" explain="org-assisted"
+      right={<span className={`badge ${full ? "badge-asst" : "badge-zk"}`}>{state.assistedCount} / {state.assistedCap} used</span>}>
+      <p className="small muted">For fans Aadhaar doesn’t cover: foreign visitors, minors with a guardian. Staff check the document in person; only its hash goes on-chain, under a quota fixed before the sale.</p>
+      <div className="form-grid">
+        <label className="wide">Fan’s wallet (shown in their app)<input value={fan} onChange={(e) => setFan(e.target.value)} placeholder="0x…" /></label>
+        <label>Document<select value={docType} onChange={(e) => setDocType(e.target.value)}><option>Passport</option><option>OCI card</option><option>Guardian + birth certificate</option></select></label>
+        <label className="two">Document number<input value={docNo} onChange={(e) => setDocNo(e.target.value)} placeholder="checked in person" /></label>
+      </div>
+      <button className="btn" disabled={!open || full || !valid} onClick={submit}>
+        {!open ? "Registration is closed" : full ? "Quota used up" : "Register at the desk"}
+      </button>
+    </Card>
   );
 }
 

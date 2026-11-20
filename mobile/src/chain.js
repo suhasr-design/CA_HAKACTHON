@@ -1,5 +1,30 @@
 import { ethers } from "ethers";
 import Constants from "expo-constants";
+import * as SecureStore from "expo-secure-store";
+
+// ---------------------------------------------------------------- the fan's own wallet
+// Generated on the phone and kept in the OS secure storage (Android Keystore-backed). Never leaves the
+// phone. A fan who loses the phone recovers entry at the venue help desk by re-proving with Aadhaar.
+const KEY_NAME = "fairtickets.walletKey.v1";
+export async function loadOrCreateOwnKey() {
+  let k = await SecureStore.getItemAsync(KEY_NAME);
+  if (!k) {
+    k = ethers.hexlify(ethers.randomBytes(32)); // fast: no mnemonic derivation on the phone
+    await SecureStore.setItemAsync(KEY_NAME, k, { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY });
+  }
+  return k;
+}
+
+/** Ask the laptop's sponsor for gas. It only pays out for a valid Aadhaar proof, once per person. */
+export async function requestSponsor(host, address, proof) {
+  const res = await fetch(`http://${host}:5173/api/sponsor`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ address, proof: { nullifier: String(proof.nullifier), timestamp: String(proof.timestamp), revealArray: proof.revealArray.map(String), groth16Proof: proof.groth16Proof.map(String) } }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || `sponsor HTTP ${res.status}`);
+  return j;
+}
 
 // The event config (contract address, ABI, demo keys) is NOT bundled into the app. It is
 // fetched from the laptop at startup (served by the website at /mobile-deployment.json, written
@@ -36,12 +61,14 @@ export async function fetchConfig(host) {
   }
 }
 
-export function makeChain(host, dep) {
+export function makeChain(host, dep, ownKey) {
   const network = ethers.Network.from(dep.chainId);
   const provider = new ethers.JsonRpcProvider(`http://${host}:8545`, network, { staticNetwork: network, pollingInterval: 1500 });
   const wallets = dep.demoKeys.map((k) => new ethers.Wallet(k, provider));
+  const own = ownKey ? new ethers.Wallet(ownKey, provider) : null;
+  const signerOf = (who) => (who === "me" ? own : wallets[who]);
   const contract = (signer = provider) => new ethers.Contract(dep.fairTickets, dep.abi, signer);
-  return { host, dep, provider, wallets, contract, aadhaarUrl: `http://${host}:5173/aadhaar.html` };
+  return { host, dep, provider, wallets, own, signerOf, contract, aadhaarUrl: `http://${host}:5173/aadhaar.html` };
 }
 
 /** Synthetic demo proof (all-zero): accepted only for synthetic accounts listed at deployment. */
@@ -56,12 +83,19 @@ export function fakeProof() {
   return { nullifier: r(), timestamp: BigInt(Math.floor(Date.now() / 1000)), revealArray: [0n, 0n, 0n, 0n], groth16Proof: Array.from({ length: 8 }, r) };
 }
 
-// Rotating gate QR, compact v2 format (see app/src/gateQr.js): "FT2.<ticketId>.<unixSeconds>.<base64 sig>".
-// The gate recovers the holder from the signature, so the QR stays small and easy for webcams to read.
+// Gate QR (see app/src/gateQr.js). The gate recovers the holder from the signature.
+//  With the gate's 4-digit code (default): v3 "FT3.<ticketId>.<code>.<base64 sig>", signed for THAT
+//    code, so it can't be prepared earlier, screenshotted or relayed later, and the phone clock is unused.
+//  Without a code: v2 "FT2.<ticketId>.<unixSeconds>.<base64 sig>", rotating every 30 s.
 export const ROTATE_SECONDS = 30;
-export async function makeGatePayload(signer, contractAddress, ticketId) {
+export async function makeGatePayload(signer, contractAddress, ticketId, gateCode) {
+  const c = contractAddress.toLowerCase();
+  if (gateCode) {
+    const sig = await signer.signMessage(`FairTickets3|${c}|${ticketId}|${gateCode}`);
+    return `FT3.${Number(ticketId)}.${gateCode}.${ethers.encodeBase64(sig)}`;
+  }
   const ts = Math.floor(Date.now() / 1000);
-  const sig = await signer.signMessage(`FairTickets2|${contractAddress.toLowerCase()}|${ticketId}|${ts}`);
+  const sig = await signer.signMessage(`FairTickets2|${c}|${ticketId}|${ts}`);
   return `FT2.${Number(ticketId)}.${ts}.${ethers.encodeBase64(sig)}`;
 }
 
@@ -71,35 +105,45 @@ export function errorText(e) {
   return String(m).replace(/^execution reverted: /, "").replace(/[\s\S]*reverted with reason string '([^']*)'[\s\S]*/, "$1").slice(0, 160);
 }
 
-/** Everything the fan app needs, for one fan. */
+/**
+ * Everything the fan app needs, for one fan. Scales to large events: it reads this fan's own
+ * position (O(1) on-chain), their own ticket and offer events, never the full seat or entrant lists.
+ */
 export async function loadFanState(chain, me) {
   const ft = chain.contract();
-  const [eventName, phase, facePrice, publicSeats, regCloses, claimDeadline, winnerCount, nextWaitlistIndex, nextTokenId, entrants, refund, block] =
+  const [eventName, phase, facePrice, publicSeats, regCloses, claimDeadline, winnerCount, nextWaitlistIndex, entrantsCount, registered, posRaw, refund, balance, block] =
     await Promise.all([
       ft.eventName(), ft.phase(), ft.facePrice(), ft.publicSeats(), ft.registrationClosesAt(), ft.claimDeadline(),
-      ft.winnerCount(), ft.nextWaitlistIndex(), ft.nextTokenId(), ft.getEntrants(), ft.pendingRefunds(me), chain.provider.getBlock("latest"),
+      ft.winnerCount(), ft.nextWaitlistIndex(), ft.entrantsCount(), ft.isRegistered(me), ft.positionOf(me), ft.pendingRefunds(me),
+      chain.provider.getBalance(me), chain.provider.getBlock("latest"),
     ]);
-  const seats = [...Array(Number(publicSeats)).keys()];
-  const [labels, offers] = await Promise.all([
-    Promise.all(seats.map((s) => ft.seatLabel(s))),
-    Promise.all(seats.map((s) => ft.offers(s))),
-  ]);
-  const ids = [...Array(Math.max(0, Number(nextTokenId) - 1)).keys()].map((i) => i + 1);
-  const tickets = await Promise.all(ids.map(async (id) => {
+  const position = posRaw === ethers.MaxUint256 ? -1 : Number(posRaw);
+
+  // My ticket: the latest TicketIssued to me that hasn't been replaced.
+  const issued = await ft.queryFilter(ft.filters.TicketIssued(null, me), 0, "latest");
+  let myTicket = null;
+  for (const e of issued.reverse()) {
+    const id = Number(e.args.tokenId);
     const c = await ft.checkTicket(id);
-    return { id, status: Number(c.status), holder: c.holder, seat: Number(c.seat), label: c.label };
-  }));
-  const list = [...entrants];
-  const position = list.indexOf(me);
-  const myOfferIdx = offers.findIndex((o) => o.active && o.fan === me);
+    if (Number(c.status) !== 3 && c.holder === me) { myTicket = { id, status: Number(c.status), seat: Number(c.seat), label: c.label }; break; }
+  }
+  // My waitlist offer: seats ever offered to me that are still open for me.
+  const offered = await ft.queryFilter(ft.filters.SeatOffered(null, me), 0, "latest");
+  let myOffer = null;
+  for (const seat of [...new Set(offered.map((e) => Number(e.args.seat)))]) {
+    const o = await ft.offers(seat);
+    if (o.active && o.fan === me) { myOffer = { seat, deadline: Number(o.deadline), label: await ft.seatLabel(seat) }; break; }
+  }
+  const winner = Number(phase) === 4 && position >= 0 && position < Number(winnerCount);
+  const myLabel = winner ? await ft.seatLabel(position) : "";
   return {
-    eventName, phase: Number(phase), facePrice, regCloses: Number(regCloses), claimDeadline: Number(claimDeadline),
-    winnerCount: Number(winnerCount), nextWaitlistIndex: Number(nextWaitlistIndex), entrantsCount: list.length,
-    chainTime: block.timestamp, registered: position >= 0, position, labels, refund,
-    myTicket: tickets.find((t) => t.holder === me && t.status !== 3) || null,
-    myOffer: myOfferIdx >= 0 ? { seat: myOfferIdx, deadline: Number(offers[myOfferIdx].deadline) } : null,
+    eventName, phase: Number(phase), facePrice, publicSeats: Number(publicSeats), regCloses: Number(regCloses), claimDeadline: Number(claimDeadline),
+    winnerCount: Number(winnerCount), nextWaitlistIndex: Number(nextWaitlistIndex), entrantsCount: Number(entrantsCount),
+    chainTime: block.timestamp, registered, position, myLabel, refund, balance, myTicket, myOffer,
   };
 }
+
+export const inr = (n) => (n ? `₹${Number(n).toLocaleString("en-IN")}` : "");
 
 export const eth = (wei) => `${ethers.formatEther(wei)} ETH`;
 export const fmtLeft = (secs) => {

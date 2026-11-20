@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { deployment, errorText, loadState, short } from "./chain";
 import { ExplainCtx, PhaseStepper, phaseName, useToast } from "./ui.jsx";
 import Home from "./pages/Home.jsx";
@@ -38,13 +38,21 @@ export default function App() {
   const [log, setLog] = useState([]);
   const toast = useToast();
 
+  // One refresh at a time: with 100+ seats and a crowd, a slow poll must not pile up behind the next.
+  const inflight = useRef(null);
   const refresh = useCallback(async () => {
-    try {
-      setState(await loadState());
-      setError("");
-    } catch (e) {
-      setError(`Can't reach the local blockchain at ${deployment.rpcUrl}. Is "npm run chain" running, and did you run "npm run deploy:local"? (${errorText(e)})`);
-    }
+    if (inflight.current) return inflight.current;
+    inflight.current = (async () => {
+      try {
+        setState(await loadState());
+        setError("");
+      } catch (e) {
+        setError(`Can't reach the local blockchain at ${deployment.rpcUrl}. Is "npm run chain" running, and did you run "npm run deploy:local"? (${errorText(e)})`);
+      } finally {
+        inflight.current = null;
+      }
+    })();
+    return inflight.current;
   }, []);
 
   useEffect(() => {

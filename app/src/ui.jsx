@@ -87,6 +87,7 @@ export function Avatar({ name, size = 32 }) {
 export function KindBadge({ kind }) {
   if (kind === "zk") return <span className="badge badge-zk" title="Registered with a real Anon Aadhaar zero-knowledge proof">ZK proof ✓</span>;
   if (kind === "synthetic") return <span className="badge badge-syn" title="Synthetic demo account">synthetic</span>;
+  if (kind === "assisted") return <span className="badge badge-asst" title="Registered at the in-person ID desk (capped, public quota)">ID desk</span>;
   return null;
 }
 

@@ -7,20 +7,26 @@ import { WebView } from "react-native-webview";
 import QRCode from "react-native-qrcode-svg";
 import Svg, { Circle } from "react-native-svg";
 import {
-  NAMES, ROTATE_SECONDS, SCALPER, defaultHost, errorText, eth, fakeProof, fetchConfig, fmtLeft, isSynthetic,
-  loadFanState, makeChain, makeGatePayload, short, syntheticProof,
+  NAMES, ROTATE_SECONDS, SCALPER, defaultHost, errorText, eth, fakeProof, fetchConfig, fmtLeft, inr, isSynthetic,
+  loadFanState, loadOrCreateOwnKey, makeChain, makeGatePayload, requestSponsor, short, syntheticProof,
 } from "./src/chain";
 
+// Bright theme, same palette as the website.
 const C = {
-  bg: "#0C0A1D", card: "#17133A", card2: "#1E1948", line: "#2C2660", ink: "#F2EFFF", muted: "#A7A0D2",
-  accent: "#8B6CFF", pink: "#FF6B9A", good: "#2BD4A4", bad: "#FF5C6C", amber: "#FFB547",
+  bg: "#F5F7FB", card: "#FFFFFF", well: "#EEF2F8", line: "#DFE5EF", ink: "#18213A", muted: "#5D6781",
+  accent: "#3D5AFE", accentSoft: "#EBEFFF", pink: "#F2557A", good: "#0E9F6E", goodSoft: "#E6F8F1",
+  bad: "#E0364A", badSoft: "#FFEDEF", amber: "#A86200", amberSoft: "#FFF6E3",
 };
+const nameFor = (who) => (who === "me" ? "You" : NAMES[who]);
 
 export default function App() {
   const [host, setHost] = useState(defaultHost());
   const [dep, setDep] = useState(null);
   const [connErr, setConnErr] = useState("");
   const [who, setWho] = useState(null);
+  const [ownKey, setOwnKey] = useState(null);
+
+  useEffect(() => { loadOrCreateOwnKey().then(setOwnKey).catch(() => setOwnKey(null)); }, []);
 
   // Load the event config from the laptop whenever the address changes (or on retry).
   const connect = useCallback(async (h) => {
@@ -34,30 +40,38 @@ export default function App() {
   }, []);
   useEffect(() => { connect(host); }, [host, connect]);
 
+  // If the organiser creates a new event, pick it up automatically.
+  useEffect(() => {
+    if (!dep) return;
+    const t = setInterval(async () => {
+      try { const d = await fetchConfig(host); if (d.fairTickets !== dep.fairTickets) setDep(d); } catch {}
+    }, 10000);
+    return () => clearInterval(t);
+  }, [dep, host]);
+
   if (!dep || who === null) {
-    return <Picker host={host} setHost={setHost} dep={dep} connErr={connErr} retry={() => connect(host)} onPick={setWho} />;
+    return <Picker host={host} setHost={setHost} dep={dep} connErr={connErr} retry={() => connect(host)} onPick={setWho} ownKey={ownKey} />;
   }
-  return <FanApp host={host} dep={dep} who={who} setWho={setWho} />;
+  return <FanApp key={dep.fairTickets} host={host} dep={dep} who={who} setWho={setWho} ownKey={ownKey} />;
 }
 
-function FanApp({ host, dep, who, setWho }) {
-  const chain = useMemo(() => makeChain(host, dep), [host, dep]);
+function FanApp({ host, dep, who, setWho, ownKey }) {
+  const chain = useMemo(() => makeChain(host, dep, ownKey), [host, dep, ownKey]);
   const [state, setState] = useState(null);
   const [err, setErr] = useState("");
   const [toast, setToast] = useState(null);
   const [busy, setBusy] = useState(false);
-
-  const me = who !== null ? chain.wallets[who].address : null;
+  const signer = chain.signerOf(who);
+  const me = signer.address;
 
   const refresh = useCallback(async () => {
-    if (who === null) return;
     try {
       setState(await loadFanState(chain, me));
       setErr("");
     } catch (e) {
       setErr(`Can't reach the blockchain at ${host}:8545. Same Wi-Fi as the laptop? (${errorText(e)})`);
     }
-  }, [chain, me, who, host]);
+  }, [chain, me, host]);
 
   useEffect(() => {
     setState(null);
@@ -88,16 +102,16 @@ function FanApp({ host, dep, who, setWho }) {
     }
   };
 
-  const ft = chain.contract(chain.wallets[who]);
+  const ft = chain.contract(signer);
   return (
     <View style={s.root}>
-      <StatusBar style="light" />
-      <ScrollView contentContainerStyle={s.scroll} refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={C.ink} />}>
+      <StatusBar style="dark" />
+      <ScrollView contentContainerStyle={s.scroll} refreshControl={<RefreshControl refreshing={false} onRefresh={refresh} tintColor={C.accent} />}>
         <View style={s.header}>
           <View style={s.row}>
-            <Avatar name={NAMES[who]} />
+            <Avatar name={who === "me" ? "Me" : NAMES[who]} />
             <View style={{ marginLeft: 10 }}>
-              <Text style={s.h2}>{NAMES[who]}</Text>
+              <Text style={s.h2}>{who === "me" ? "You · this phone’s wallet" : NAMES[who]}</Text>
               <Text style={s.tiny}>{short(me)}</Text>
             </View>
           </View>
@@ -106,23 +120,25 @@ function FanApp({ host, dep, who, setWho }) {
 
         {err ? <View style={s.errBox}><Text style={s.errT}>{err}</Text></View> : null}
         {!state && !err ? <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} /> : null}
-        {state ? <Fan state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} /> : null}
+        {state ? <Fan state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} show={show} /> : null}
 
         <Text style={[s.tiny, { textAlign: "center", marginTop: 24 }]}>
-          Demo · local test blockchain at {host} · test ETH · Anon Aadhaar
+          Demo · local test blockchain at {host} · test ETH · Anon Aadhaar {dep.aadhaarMode === "test" ? "test mode" : "real (UIDAI)"}
         </Text>
+        <Text style={[s.tiny, { textAlign: "center", marginTop: 4 }]}>Official event contract {short(dep.fairTickets)} · check it on the organiser’s website</Text>
       </ScrollView>
       {toast ? <Toast toast={toast} onClose={() => setToast(null)} /> : null}
     </View>
   );
 }
 
-// ---------------------------------------------------------------- identity picker (demo)
-function Picker({ host, setHost, dep, connErr, retry, onPick }) {
+// ---------------------------------------------------------------- start: whose phone is this?
+function Picker({ host, setHost, dep, connErr, retry, onPick, ownKey }) {
   const [h, setH] = useState(host);
+  const ev = dep?.event || {};
   return (
     <View style={s.root}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       <ScrollView contentContainerStyle={s.scroll}>
         <View style={s.brand}><Text style={s.logo}>FT</Text></View>
         <Text style={s.h1}>Fair Tickets</Text>
@@ -131,7 +147,7 @@ function Picker({ host, setHost, dep, connErr, retry, onPick }) {
           <Text style={s.label}>LAPTOP ADDRESS (same Wi-Fi)</Text>
           <TextInput value={h} onChangeText={setH} onEndEditing={() => setHost(h.trim())} style={s.input} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
           <Text style={s.tiny}>Blockchain on port 8545, website and Anon Aadhaar page on port 5173.</Text>
-          {dep ? <Text style={[s.tiny, { color: C.good, marginTop: 8 }]}>✓ Connected · event contract {short(dep.fairTickets)}</Text>
+          {dep ? <Text style={[s.tiny, { color: C.good, marginTop: 8 }]}>✓ Connected · {ev.title || "event"} · contract {short(dep.fairTickets)}</Text>
             : connErr ? (
               <>
                 <Text style={[s.tiny, { color: C.bad, marginTop: 8 }]}>{connErr}</Text>
@@ -139,14 +155,25 @@ function Picker({ host, setHost, dep, connErr, retry, onPick }) {
               </>
             ) : <ActivityIndicator color={C.accent} style={{ marginTop: 8 }} />}
         </View>
-        <Text style={[s.label, { marginTop: 18 }]}>DEMO: WHO IS USING THIS PHONE?</Text>
+
+        <Text style={[s.label, { marginTop: 18 }]}>REAL FAN</Text>
+        <Pressable disabled={!dep || !ownKey} onPress={() => onPick("me")} style={({ pressed }) => [s.pick, s.pickMe, (pressed || !dep || !ownKey) && { opacity: 0.5 }]}>
+          <Avatar name="Me" />
+          <View style={{ flex: 1, marginLeft: 12 }}>
+            <Text style={s.pickT}>Use my own wallet</Text>
+            <Text style={s.tiny}>Created on this phone, kept in secure storage. Prove with your real Aadhaar.</Text>
+          </View>
+          <Text style={s.muted}>›</Text>
+        </Pressable>
+
+        <Text style={[s.label, { marginTop: 18 }]}>DEMO IDENTITIES (LABELLED)</Text>
         {NAMES.map((n, i) => i === 0 ? null : (
           <Pressable key={i} disabled={!dep} onPress={() => onPick(i)} style={({ pressed }) => [s.pick, (pressed || !dep) && { opacity: 0.5 }]}>
             <Avatar name={n} />
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={s.pickT}>{n}</Text>
               <Text style={s.tiny}>
-                {i === SCALPER ? "Scalper bot · no Aadhaar QR" : isSynthetic(dep, i) ? "Synthetic demo fan · quick join or real proof" : "Real fan · must prove with Anon Aadhaar"}
+                {i === SCALPER ? "Scalper bot · no Aadhaar QR" : isSynthetic(dep, i) ? "Synthetic demo fan · quick join or real proof" : "Demo fan · must prove with Anon Aadhaar"}
               </Text>
             </View>
             <Text style={s.muted}>›</Text>
@@ -158,40 +185,46 @@ function Picker({ host, setHost, dep, connErr, retry, onPick }) {
 }
 
 // ---------------------------------------------------------------- main fan flow
-function Fan({ state, who, me, ft, chain, run, busy }) {
+function Fan({ state, who, me, ft, chain, run, busy, show }) {
   const shuffled = state.phase === 4;
   const isWinner = shuffled && state.position >= 0 && state.position < state.winnerCount;
   const waitRank = shuffled && state.position >= state.winnerCount ? state.position - state.winnerCount + 1 : null;
   const step = state.myTicket ? 3 : shuffled && state.registered ? 2 : state.registered ? 1 : 0;
+  const ev = chain.dep.event || {};
   const parts = state.eventName.split("·");
+  const when = ev.startsAt ? new Date(ev.startsAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }) : "";
 
   return (
     <View>
       <View style={s.event}>
-        <Text style={s.eventTop}>TONIGHT</Text>
-        <Text style={s.eventT}>{parts[0].trim()}</Text>
-        <Text style={s.eventS}>{parts.slice(1).join("·").trim()} · {eth(state.facePrice)}</Text>
+        <Text style={s.eventTop}>FAIR LOTTERY · {state.publicSeats} SEATS</Text>
+        <Text style={s.eventT}>{ev.title || parts[0].trim()}</Text>
+        <Text style={s.eventS}>{ev.venue || parts.slice(1).join("·").trim()}</Text>
+        <Text style={s.eventS}>{[when, inr(ev.priceInr), eth(state.facePrice)].filter(Boolean).join(" · ")}</Text>
       </View>
 
       <View style={s.steps}>
         {["Verify", "Draw", "Result", "Ticket"].map((label, i) => (
           <View key={label} style={s.stepItem}>
             <View style={[s.stepDot, i < step && { backgroundColor: C.good }, i === step && { backgroundColor: C.accent }]}>
-              <Text style={s.stepN}>{i < step ? "✓" : i + 1}</Text>
+              <Text style={[s.stepN, i <= step && { color: "#fff" }]}>{i < step ? "✓" : i + 1}</Text>
             </View>
-            <Text style={[s.tiny, i === step && { color: C.ink }]}>{label}</Text>
+            <Text style={[s.tiny, i === step && { color: C.ink, fontWeight: "700" }]}>{label}</Text>
           </View>
         ))}
       </View>
 
-      {!state.registered && state.phase === 1 && <Verify state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} />}
+      {!state.registered && state.phase === 1 && <Verify state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} show={show} />}
       {!state.registered && state.phase !== 1 && <Card><Text style={s.muted}>Registration is closed for this event.</Text></Card>}
 
       {state.registered && !shuffled && (
         <Card center>
           <Pulse><Text style={s.emoji}>🎲</Text></Pulse>
           <Text style={s.h3}>You’re in the draw</Text>
-          <Text style={[s.muted, s.c]}>{state.entrantsCount} verified people registered. Everyone has the same chance; signing up early gives no advantage.</Text>
+          <Text style={[s.muted, s.c]}>
+            {state.entrantsCount} verified people for {state.publicSeats} seats. Everyone has the same chance; signing up early gives no advantage.
+            {state.entrantsCount > state.publicSeats ? ` Your chance: ${((state.publicSeats / state.entrantsCount) * 100).toFixed(0)}%. If you’re not in the first ${state.publicSeats}, you’re on the waitlist in a fair order.` : ""}
+          </Text>
           {state.phase === 1 && <Text style={[s.tiny, s.c]}>Registration closes in {fmtLeft(state.regCloses - state.chainTime)}</Text>}
         </Card>
       )}
@@ -200,14 +233,15 @@ function Fan({ state, who, me, ft, chain, run, busy }) {
         <Card center tone="good">
           <Pulse><Text style={s.emoji}>🎉</Text></Pulse>
           <Text style={s.h3}>You won a seat!</Text>
-          {!state.labels[state.position] ? <Text style={s.muted}>Waiting for the organiser to reveal seats…</Text>
+          <Text style={[s.tiny, s.c]}>Drawn #{state.position + 1} of {state.entrantsCount} · first {state.winnerCount} win</Text>
+          {!state.myLabel ? <Text style={s.muted}>Waiting for the organiser to reveal seats…</Text>
             : state.chainTime > state.claimDeadline ? <Text style={{ color: C.bad }}>Your claim window has closed.</Text>
             : (
               <>
-                <Text style={s.seat}>Seat {state.labels[state.position]}</Text>
+                <Text style={s.seat}>Seat {state.myLabel}</Text>
                 <Text style={[s.muted, s.c]}>Pay exactly face value within {fmtLeft(state.claimDeadline - state.chainTime)}.</Text>
                 <Btn primary busy={busy} label={`Pay ${eth(state.facePrice)} and claim`}
-                  onPress={() => run(`Seat ${state.labels[state.position]} claimed`, () => ft.claimTicket(state.position, { value: state.facePrice }))} />
+                  onPress={() => run(`Seat ${state.myLabel} claimed`, () => ft.claimTicket(state.position, { value: state.facePrice }))} />
               </>
             )}
         </Card>
@@ -217,8 +251,9 @@ function Fan({ state, who, me, ft, chain, run, busy }) {
         <Card center>
           <Text style={s.label}>YOUR PLACE ON THE WAITLIST</Text>
           <Text style={s.huge}>#{waitRank}</Text>
-          <Text style={[s.muted, s.c]}>
-            {Math.max(0, state.position - state.nextWaitlistIndex) === 0 ? "You’re next in line." : `${state.position - state.nextWaitlistIndex} ahead of you.`} If a seat is returned, it’s offered to you here.
+          <Text style={[s.tiny, s.c]}>Drawn #{state.position + 1} of {state.entrantsCount}; seats went to #1–{state.winnerCount}.</Text>
+          <Text style={[s.muted, s.c, { marginTop: 6 }]}>
+            {Math.max(0, state.position - state.nextWaitlistIndex) === 0 ? "You’re next in line." : `${state.position - state.nextWaitlistIndex} ahead of you.`} The first returned or unclaimed seat is offered to you here, at face value.
           </Text>
         </Card>
       )}
@@ -227,10 +262,10 @@ function Fan({ state, who, me, ft, chain, run, busy }) {
         <Card center tone="amber">
           <Pulse><Text style={s.emoji}>🎫</Text></Pulse>
           <Text style={s.h3}>A seat is available for you</Text>
-          <Text style={s.seat}>Seat {state.labels[state.myOffer.seat]}</Text>
+          <Text style={s.seat}>Seat {state.myOffer.label}</Text>
           <Text style={[s.muted, s.c]}>Accept within {fmtLeft(state.myOffer.deadline - state.chainTime)} at face value, or it moves to the next fan.</Text>
           <Btn primary busy={busy} label={`Accept and pay ${eth(state.facePrice)}`}
-            onPress={() => run(`Seat ${state.labels[state.myOffer.seat]} accepted`, () => ft.acceptOffer(state.myOffer.seat, { value: state.facePrice }))} />
+            onPress={() => run(`Seat ${state.myOffer.label} accepted`, () => ft.acceptOffer(state.myOffer.seat, { value: state.facePrice }))} />
         </Card>
       )}
 
@@ -248,12 +283,23 @@ function Fan({ state, who, me, ft, chain, run, busy }) {
 }
 
 // ---------------------------------------------------------------- step 1: verify
-function Verify({ state, who, me, ft, chain, run, busy }) {
+function Verify({ state, who, me, ft, chain, run, busy, show }) {
   const [open, setOpen] = useState(false);
   const isBot = who === SCALPER;
 
   const onProof = async (p) => {
     setOpen(false);
+    // A brand-new wallet has no gas: the laptop's sponsor pays it, but ONLY for a valid Aadhaar proof
+    // bound to this wallet, once per person. Bots without Aadhaar get nothing.
+    if (state.balance < state.facePrice + 10n ** 16n) {
+      try {
+        const r = await requestSponsor(chain.host, me, p);
+        show(true, `Gas sponsored (${r.amount} test ETH)`, "Released only because your Aadhaar proof is valid.");
+      } catch (e) {
+        show(false, "Gas sponsor refused", errorText(e));
+        return;
+      }
+    }
     await run("Registered with a real ZK proof", () =>
       ft.register(BigInt(p.nullifier), BigInt(p.timestamp), p.revealArray.map(BigInt), p.groth16Proof.map(BigInt)));
   };
@@ -280,6 +326,13 @@ function Verify({ state, who, me, ft, chain, run, busy }) {
             return ft.register(p.nullifier, p.timestamp, p.revealArray, p.groth16Proof);
           })} />
         </>
+      )}
+
+      {who === "me" && (
+        <View style={s.addrBox}>
+          <Text style={s.tiny}>No Aadhaar (foreign visitor, minor)? Show this wallet address at the organiser’s ID desk:</Text>
+          <Text selectable style={s.addr}>{me}</Text>
+        </View>
       )}
       <Text style={[s.tiny, { marginTop: 10 }]}>Closes in {fmtLeft(state.regCloses - state.chainTime)}</Text>
 
@@ -308,27 +361,31 @@ function Ticket({ state, who, me, ft, chain, run, busy }) {
   const [payload, setPayload] = useState("");
   const [left, setLeft] = useState(ROTATE_SECONDS);
   const [confirm, setConfirm] = useState(false);
+  const [code, setCode] = useState("");
   const returning = t.status === 2;
+  const gateCode = /^\d{4}$/.test(code) ? code : null;
+  const signer = chain.signerOf(who);
 
   useEffect(() => {
     let alive = true;
     const regen = async () => {
-      const p = await makeGatePayload(chain.wallets[who], chain.dep.fairTickets, t.id);
+      const p = await makeGatePayload(signer, chain.dep.fairTickets, t.id, gateCode);
       if (alive) { setPayload(p); setLeft(ROTATE_SECONDS); }
     };
     regen();
+    if (gateCode) return () => { alive = false; };
     const rot = setInterval(regen, ROTATE_SECONDS * 1000);
     const tick = setInterval(() => setLeft((x) => Math.max(0, x - 1)), 1000);
     return () => { alive = false; clearInterval(rot); clearInterval(tick); };
-  }, [who, t.id, chain]);
+  }, [signer, t.id, chain, gateCode]);
 
   return (
     <View style={{ marginTop: 14 }}>
       <View style={[s.ticket, returning && { opacity: 0.6 }]}>
         <View style={s.ticketTop}>
-          <View>
+          <View style={{ flex: 1 }}>
             <Text style={s.ticketSmall}>ADMIT ONE · #{t.id}</Text>
-            <Text style={s.ticketEvent}>{state.eventName.split("·")[0].trim()}</Text>
+            <Text style={s.ticketEvent} numberOfLines={2}>{chain.dep.event?.title || state.eventName.split("·")[0].trim()}</Text>
           </View>
           <View style={{ alignItems: "flex-end" }}>
             <Text style={s.ticketSmall}>SEAT</Text>
@@ -340,14 +397,23 @@ function Ticket({ state, who, me, ft, chain, run, busy }) {
           <Text style={s.returning}>Being returned: waiting for the next fan on the waitlist to accept.</Text>
         ) : (
           <View style={s.qrRow}>
+            <Text style={s.label}>AT THE GATE: TYPE THE CODE ON ITS SCREEN</Text>
+            <TextInput value={code} onChangeText={(v) => setCode(v.replace(/\D/g, "").slice(0, 4))} placeholder="4-digit gate code"
+              keyboardType="number-pad" maxLength={4} style={s.codeInput} placeholderTextColor="#9AA3B8" />
             <View style={s.qrBox}>{payload ? <QRCode value={payload} size={230} ecl="L" quietZone={14} color="#000000" backgroundColor="#FFFFFF" /> : <ActivityIndicator />}</View>
             <View style={{ alignItems: "center", marginTop: 12 }}>
-              <Ring left={left} total={ROTATE_SECONDS} />
-              <Text style={s.ticketNote}>New code every {ROTATE_SECONDS}s, signed by your key. Screenshots expire.</Text>
+              {gateCode ? (
+                <Text style={[s.ticketNote, { color: C.good, fontWeight: "700" }]}>✓ Signed for gate code {gateCode}. Only valid at that gate, right now.</Text>
+              ) : (
+                <>
+                  <Ring left={left} total={ROTATE_SECONDS} />
+                  <Text style={s.ticketNote}>Without a gate code this QR rotates every {ROTATE_SECONDS}s. Gates that ask for a code need it typed above.</Text>
+                </>
+              )}
             </View>
           </View>
         )}
-        <Text style={s.ticketFoot}>Bound to {short(me)} · non-transferable</Text>
+        <Text style={s.ticketFoot}>Bound to {short(me)} · non-transferable · lost phone? the venue help desk re-checks your Aadhaar</Text>
       </View>
 
       {!returning && (
@@ -364,23 +430,24 @@ function Ticket({ state, who, me, ft, chain, run, busy }) {
 
 // ---------------------------------------------------------------- small components
 function Card({ children, center, tone }) {
-  const border = tone === "good" ? "#2BD4A466" : tone === "amber" ? "#FFB54766" : C.line;
-  return <View style={[s.card, { borderColor: border }, center && { alignItems: "center" }]}>{children}</View>;
+  const border = tone === "good" ? "#A8E6CF" : tone === "amber" ? "#F0C36D" : C.line;
+  const bg = tone === "good" ? C.goodSoft : tone === "amber" ? C.amberSoft : C.card;
+  return <View style={[s.card, { borderColor: border, backgroundColor: bg }, center && { alignItems: "center" }]}>{children}</View>;
 }
 
 function Btn({ label, onPress, primary, danger, warn, busy }) {
   return (
     <Pressable disabled={busy} onPress={onPress}
       style={({ pressed }) => [s.btn, primary && s.btnP, danger && s.btnD, warn && s.btnW, (pressed || busy) && { opacity: 0.6 }]}>
-      <Text style={[s.btnT, danger && { color: "#FF9AA4" }, warn && { color: C.amber }]}>{busy ? "Working…" : label}</Text>
+      <Text style={[s.btnT, primary && { color: "#fff" }, danger && { color: C.bad }, warn && { color: C.amber }]}>{busy ? "Working…" : label}</Text>
     </Pressable>
   );
 }
 
-const AVATAR = ["#7C5CFF", "#FF6B9A", "#2BD4A4", "#FFB547", "#4CC9F0", "#F72585", "#B5E48C", "#FF8C42"];
+const AVATAR = ["#3D5AFE", "#E64980", "#0E9F6E", "#E8930C", "#1C9AD6", "#7B5CFF", "#2F9E44", "#F76707"];
 function Avatar({ name }) {
   const bg = AVATAR[[...name].reduce((a, ch) => a + ch.charCodeAt(0), 0) % AVATAR.length];
-  return <View style={[s.avatar, { backgroundColor: bg }]}><Text style={s.avatarT}>{name === "Scalper" ? "🤖" : name[0]}</Text></View>;
+  return <View style={[s.avatar, { backgroundColor: bg }]}><Text style={s.avatarT}>{name === "Scalper" ? "🤖" : name === "Me" ? "★" : name[0]}</Text></View>;
 }
 
 function Ring({ left, total }) {
@@ -388,11 +455,11 @@ function Ring({ left, total }) {
   return (
     <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
       <Svg width={size} height={size} style={{ position: "absolute" }}>
-        <Circle cx={size / 2} cy={size / 2} r={r} stroke="#8B6CFF33" strokeWidth={5} fill="none" />
+        <Circle cx={size / 2} cy={size / 2} r={r} stroke="#E2E8F2" strokeWidth={5} fill="none" />
         <Circle cx={size / 2} cy={size / 2} r={r} stroke={C.accent} strokeWidth={5} fill="none" strokeLinecap="round"
           strokeDasharray={`${c}`} strokeDashoffset={c * (1 - left / total)} rotation={-90} origin={`${size / 2}, ${size / 2}`} />
       </Svg>
-      <Text style={{ color: "#16132E", fontWeight: "700" }}>{left}s</Text>
+      <Text style={{ color: C.ink, fontWeight: "700" }}>{left}s</Text>
     </View>
   );
 }
@@ -434,46 +501,50 @@ const s = StyleSheet.create({
   ink: { color: C.ink, fontSize: 14 },
   tiny: { color: C.muted, fontSize: 12 },
   label: { color: C.good, fontSize: 11, fontWeight: "700", letterSpacing: 1.5, marginBottom: 6 },
-  input: { color: C.ink, backgroundColor: C.card2, borderColor: C.line, borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 16, marginBottom: 6 },
-  card: { backgroundColor: C.card, borderColor: C.line, borderWidth: 1, borderRadius: 18, padding: 16, marginTop: 14 },
-  chip: { borderColor: C.line, borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7 },
+  input: { color: C.ink, backgroundColor: C.card, borderColor: C.line, borderWidth: 1, borderRadius: 10, padding: 10, fontSize: 16, marginBottom: 6 },
+  card: { backgroundColor: C.card, borderColor: C.line, borderWidth: 1, borderRadius: 18, padding: 16, marginTop: 14, elevation: 1 },
+  chip: { borderColor: C.line, borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 7, backgroundColor: C.card },
   chipT: { color: C.ink, fontSize: 13 },
   pick: { flexDirection: "row", alignItems: "center", backgroundColor: C.card, borderColor: C.line, borderWidth: 1, borderRadius: 14, padding: 12, marginTop: 8 },
+  pickMe: { borderColor: C.accent, backgroundColor: C.accentSoft },
   pickT: { color: C.ink, fontSize: 16, fontWeight: "600" },
   avatar: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
-  avatarT: { color: "#120F2A", fontWeight: "800", fontSize: 16 },
-  event: { backgroundColor: C.pink, borderRadius: 20, padding: 18, overflow: "hidden" },
-  eventTop: { color: "#160F33", fontSize: 11, fontWeight: "800", letterSpacing: 2 },
-  eventT: { color: "#160F33", fontSize: 30, fontWeight: "800" },
-  eventS: { color: "#160F33cc", fontSize: 13 },
+  avatarT: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  event: { backgroundColor: C.accent, borderRadius: 20, padding: 18, overflow: "hidden" },
+  eventTop: { color: "#ffffffcc", fontSize: 11, fontWeight: "800", letterSpacing: 2 },
+  eventT: { color: "#fff", fontSize: 28, fontWeight: "800", marginTop: 2 },
+  eventS: { color: "#ffffffdd", fontSize: 13, marginTop: 2 },
   steps: { flexDirection: "row", justifyContent: "space-between", marginTop: 16, paddingHorizontal: 6 },
   stepItem: { alignItems: "center", flex: 1 },
-  stepDot: { width: 28, height: 28, borderRadius: 14, backgroundColor: C.line, alignItems: "center", justifyContent: "center", marginBottom: 4 },
+  stepDot: { width: 28, height: 28, borderRadius: 14, backgroundColor: "#D5DCE8", alignItems: "center", justifyContent: "center", marginBottom: 4 },
   stepN: { color: C.ink, fontWeight: "700", fontSize: 12 },
   emoji: { fontSize: 46 },
-  seat: { color: C.ink, fontSize: 26, fontWeight: "800", marginVertical: 8, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12, backgroundColor: "#ffffff12" },
+  seat: { color: C.accent, fontSize: 26, fontWeight: "800", marginVertical: 8, paddingHorizontal: 16, paddingVertical: 6, borderRadius: 12, backgroundColor: C.accentSoft },
   huge: { color: C.accent, fontSize: 64, fontWeight: "800", marginVertical: 4 },
-  btn: { marginTop: 10, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, alignItems: "center", backgroundColor: C.card2, borderWidth: 1, borderColor: C.line, alignSelf: "stretch" },
+  btn: { marginTop: 10, borderRadius: 14, paddingVertical: 14, paddingHorizontal: 16, alignItems: "center", backgroundColor: C.card, borderWidth: 1, borderColor: C.line, alignSelf: "stretch" },
   btnP: { backgroundColor: C.accent, borderColor: C.accent },
-  btnD: { backgroundColor: "#FF5C6C18", borderColor: "#FF5C6C88" },
-  btnW: { borderColor: C.amber },
+  btnD: { backgroundColor: C.badSoft, borderColor: "#F5B5BE" },
+  btnW: { borderColor: C.amber, backgroundColor: C.amberSoft },
   btnT: { color: C.ink, fontWeight: "700", fontSize: 15 },
-  botBox: { backgroundColor: "#FF5C6C18", borderColor: "#FF5C6C55", borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 10 },
-  errBox: { backgroundColor: "#FF5C6C22", borderColor: C.bad, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10 },
-  errT: { color: "#FFC2C8", fontSize: 13 },
-  modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, paddingTop: 44, borderBottomColor: C.line, borderBottomWidth: 1 },
-  ticket: { backgroundColor: "#F7F3FF", borderRadius: 22, overflow: "hidden" },
+  botBox: { backgroundColor: C.badSoft, borderColor: "#F5B5BE", borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 10 },
+  addrBox: { backgroundColor: C.well, borderRadius: 12, padding: 10, marginTop: 12 },
+  addr: { color: C.ink, fontSize: 12, fontFamily: "monospace", marginTop: 4 },
+  errBox: { backgroundColor: C.badSoft, borderColor: C.bad, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10 },
+  errT: { color: "#A51D2D", fontSize: 13 },
+  modalHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: 16, paddingTop: 44, borderBottomColor: C.line, borderBottomWidth: 1, backgroundColor: C.card },
+  ticket: { backgroundColor: "#FFFFFF", borderRadius: 22, overflow: "hidden", borderWidth: 1, borderColor: C.line, elevation: 3 },
   ticketTop: { backgroundColor: C.accent, padding: 16, flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" },
   ticketSmall: { color: "#ffffffcc", fontSize: 11, fontWeight: "700", letterSpacing: 1 },
-  ticketEvent: { color: "#fff", fontSize: 22, fontWeight: "800" },
+  ticketEvent: { color: "#fff", fontSize: 20, fontWeight: "800" },
   ticketSeat: { color: "#fff", fontSize: 30, fontWeight: "800" },
-  perf: { borderTopWidth: 2, borderStyle: "dashed", borderColor: "#8B6CFF66", marginHorizontal: 14 },
+  perf: { borderTopWidth: 2, borderStyle: "dashed", borderColor: "#C9D3FF", marginHorizontal: 14 },
   qrRow: { alignItems: "center", padding: 18 },
-  qrBox: { backgroundColor: "#fff", padding: 10, borderRadius: 12 },
-  ticketNote: { color: "#5B5680", fontSize: 12, textAlign: "center", marginTop: 6, maxWidth: 240 },
-  ticketFoot: { color: "#5B5680", fontSize: 12, paddingHorizontal: 16, paddingBottom: 14 },
-  returning: { color: "#160F33", fontWeight: "700", padding: 24, textAlign: "center" },
-  toast: { position: "absolute", left: 16, right: 16, bottom: 28, backgroundColor: C.card2, borderWidth: 1, borderRadius: 14, padding: 14 },
+  codeInput: { color: C.ink, backgroundColor: C.well, borderColor: C.line, borderWidth: 1, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16, fontSize: 26, fontWeight: "800", letterSpacing: 8, textAlign: "center", width: 220, marginBottom: 12 },
+  qrBox: { backgroundColor: "#fff", padding: 10, borderRadius: 12, borderWidth: 1, borderColor: C.line },
+  ticketNote: { color: C.muted, fontSize: 12, textAlign: "center", marginTop: 6, maxWidth: 260 },
+  ticketFoot: { color: C.muted, fontSize: 12, paddingHorizontal: 16, paddingBottom: 14 },
+  returning: { color: C.ink, fontWeight: "700", padding: 24, textAlign: "center" },
+  toast: { position: "absolute", left: 16, right: 16, bottom: 28, backgroundColor: C.card, borderWidth: 1, borderRadius: 14, padding: 14, elevation: 6 },
   toastT: { fontWeight: "700", fontSize: 15 },
   toastB: { color: C.muted, fontSize: 13, marginTop: 4 },
 });

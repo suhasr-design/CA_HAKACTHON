@@ -1,10 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
-import proofRelay from "./proof-relay.js";
+import devApi from "./dev-api.js";
 
 export default defineConfig({
-  plugins: [react(), proofRelay()],
+  plugins: [react(), devApi()],
   // The Anon Aadhaar SDK's dependencies require("crypto") on Node-only paths; give the browser a stub.
   resolve: { alias: { crypto: resolve(__dirname, "src/shims/crypto.js") } },
   // host: true -> reachable from phones on the same Wi-Fi (the Android app opens /aadhaar.html).

@@ -106,6 +106,32 @@ describe("FairTicketsCommitReveal (Quai Orchard randomness)", () => {
     expect((await ft.getLiveTicketsPage(2, 1)).ids.map(String)).to.deep.equal(["2"]);
   });
 
+  it("assisted desk: capped, organiser-only, one registration per document", async () => {
+    const { ft, fans, stranger } = await loadFixture(deploy);
+    await ft.setAssistedCap(1);
+    await ft.commitSeed(COMMIT);
+    const now = await time.latest();
+    await ft.openRegistration(now + 600, now + 86400);
+    await expect(ft.setAssistedCap(5)).to.be.revertedWithCustomError(ft, "WrongPhase"); // quota fixed once open
+    const doc = ethers.id("passport:X1234567");
+    await expect(ft.connect(stranger).assistedRegister(fans[0].address, doc)).to.be.revertedWithCustomError(ft, "OwnableUnauthorizedAccount");
+    await expect(ft.assistedRegister(fans[0].address, doc)).to.emit(ft, "AssistedRegistered").withArgs(fans[0].address, doc);
+    expect(await ft.isRegistered(fans[0].address)).to.equal(true);
+    expect(await ft.assistedCount()).to.equal(1n);
+    await expect(ft.assistedRegister(fans[1].address, ethers.id("passport:other"))).to.be.revertedWith("Assisted quota full");
+  });
+
+  it("assisted desk rejects the same document twice", async () => {
+    const { ft, fans } = await loadFixture(deploy);
+    await ft.setAssistedCap(5);
+    await ft.commitSeed(COMMIT);
+    const now = await time.latest();
+    await ft.openRegistration(now + 600, now + 86400);
+    const doc = ethers.id("passport:X1234567");
+    await ft.assistedRegister(fans[0].address, doc);
+    await expect(ft.assistedRegister(fans[1].address, doc)).to.be.revertedWith("This person is already registered");
+  });
+
   it("only the organiser reveals; anyone can force a fallback draw if they don't", async () => {
     const { ft, stranger } = await loadFixture(registeredAndClosed);
     await ft.requestDraw();
