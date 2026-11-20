@@ -1,32 +1,47 @@
 import { ethers } from "ethers";
 import Constants from "expo-constants";
-import deployment from "./deployment.json";
 
-export { deployment };
+// The event config (contract address, ABI, demo keys) is NOT bundled into the app. It is
+// fetched from the laptop at startup (served by the website at /mobile-deployment.json, written
+// by scripts/deploy-local.js), so a fresh deployment never needs a new APK.
 
 export const NAMES = [
   "Organiser", "Asha", "Bilal", "Chetan", "Divya", "Esha", "Farhan", "Gauri", "Harsh",
   "Isha", "Jai", "Kavya", "Lokesh", "Meera", "Nikhil", "Omkar", "Priya", "Rahul", "Sneha", "Scalper",
 ];
 export const SCALPER = 19;
-export const isSynthetic = (i) => deployment.syntheticAccounts.includes(i);
+export const isSynthetic = (dep, i) => !!dep && dep.syntheticAccounts.includes(i);
 export const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");
 
 /**
- * The laptop running the blockchain and the web server. In Expo Go, the dev server's address
- * (hostUri, e.g. "192.168.1.20:8081") is the laptop, so we reuse its IP.
+ * The laptop running the blockchain and the website.
+ * - In Expo Go: the dev server's address (hostUri) is the laptop.
+ * - In the APK: the address baked in at build time (app.json extra.defaultHost), editable in the app.
  */
 export function defaultHost() {
   const uri = Constants.expoConfig?.hostUri || "";
-  return uri.split(":")[0] || "192.168.1.2";
+  return uri.split(":")[0] || Constants.expoConfig?.extra?.defaultHost || "192.168.1.2";
 }
 
-export function makeChain(host) {
-  const network = ethers.Network.from(deployment.chainId);
+/** Downloads the current event config from the laptop. */
+export async function fetchConfig(host) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 6000);
+  try {
+    const res = await fetch(`http://${host}:5173/mobile-deployment.json?t=${Date.now()}`, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function makeChain(host, dep) {
+  const network = ethers.Network.from(dep.chainId);
   const provider = new ethers.JsonRpcProvider(`http://${host}:8545`, network, { staticNetwork: network, pollingInterval: 1500 });
-  const wallets = deployment.demoKeys.map((k) => new ethers.Wallet(k, provider));
-  const contract = (signer = provider) => new ethers.Contract(deployment.fairTickets, deployment.abi, signer);
-  return { host, provider, wallets, contract, aadhaarUrl: `http://${host}:5173/aadhaar.html` };
+  const wallets = dep.demoKeys.map((k) => new ethers.Wallet(k, provider));
+  const contract = (signer = provider) => new ethers.Contract(dep.fairTickets, dep.abi, signer);
+  return { host, dep, provider, wallets, contract, aadhaarUrl: `http://${host}:5173/aadhaar.html` };
 }
 
 /** Synthetic demo proof (all-zero): accepted only for synthetic accounts listed at deployment. */
@@ -43,8 +58,8 @@ export function fakeProof() {
 
 // Rotating gate QR: identical format to the web gate scanner (app/src/gateQr.js).
 export const ROTATE_SECONDS = 30;
-export async function makeGatePayload(signer, ticketId) {
-  const c = deployment.fairTickets;
+export async function makeGatePayload(signer, contractAddress, ticketId) {
+  const c = contractAddress;
   const h = signer.address;
   const ts = Math.floor(Date.now() / 1000);
   const s = await signer.signMessage(`FairTickets|${c.toLowerCase()}|${ticketId}|${h.toLowerCase()}|${ts}`);

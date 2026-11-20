@@ -7,7 +7,7 @@ import { WebView } from "react-native-webview";
 import QRCode from "react-native-qrcode-svg";
 import Svg, { Circle } from "react-native-svg";
 import {
-  NAMES, ROTATE_SECONDS, SCALPER, defaultHost, deployment, errorText, eth, fakeProof, fmtLeft, isSynthetic,
+  NAMES, ROTATE_SECONDS, SCALPER, defaultHost, errorText, eth, fakeProof, fetchConfig, fmtLeft, isSynthetic,
   loadFanState, makeChain, makeGatePayload, short, syntheticProof,
 } from "./src/chain";
 
@@ -18,8 +18,30 @@ const C = {
 
 export default function App() {
   const [host, setHost] = useState(defaultHost());
-  const chain = useMemo(() => makeChain(host), [host]);
+  const [dep, setDep] = useState(null);
+  const [connErr, setConnErr] = useState("");
   const [who, setWho] = useState(null);
+
+  // Load the event config from the laptop whenever the address changes (or on retry).
+  const connect = useCallback(async (h) => {
+    setDep(null);
+    setConnErr("");
+    try {
+      setDep(await fetchConfig(h));
+    } catch (e) {
+      setConnErr(`Can't reach the laptop at ${h}. Check it's on the same Wi-Fi and the website is running. (${errorText(e)})`);
+    }
+  }, []);
+  useEffect(() => { connect(host); }, [host, connect]);
+
+  if (!dep || who === null) {
+    return <Picker host={host} setHost={setHost} dep={dep} connErr={connErr} retry={() => connect(host)} onPick={setWho} />;
+  }
+  return <FanApp host={host} dep={dep} who={who} setWho={setWho} />;
+}
+
+function FanApp({ host, dep, who, setWho }) {
+  const chain = useMemo(() => makeChain(host, dep), [host, dep]);
   const [state, setState] = useState(null);
   const [err, setErr] = useState("");
   const [toast, setToast] = useState(null);
@@ -66,8 +88,6 @@ export default function App() {
     }
   };
 
-  if (who === null) return <Picker host={host} setHost={setHost} onPick={setWho} />;
-
   const ft = chain.contract(chain.wallets[who]);
   return (
     <View style={s.root}>
@@ -98,7 +118,7 @@ export default function App() {
 }
 
 // ---------------------------------------------------------------- identity picker (demo)
-function Picker({ host, setHost, onPick }) {
+function Picker({ host, setHost, dep, connErr, retry, onPick }) {
   const [h, setH] = useState(host);
   return (
     <View style={s.root}>
@@ -110,16 +130,23 @@ function Picker({ host, setHost, onPick }) {
         <View style={[s.card, { marginTop: 20 }]}>
           <Text style={s.label}>LAPTOP ADDRESS (same Wi-Fi)</Text>
           <TextInput value={h} onChangeText={setH} onEndEditing={() => setHost(h.trim())} style={s.input} autoCapitalize="none" keyboardType="numbers-and-punctuation" />
-          <Text style={s.tiny}>Blockchain on port 8545, Anon Aadhaar page on port 5173.</Text>
+          <Text style={s.tiny}>Blockchain on port 8545, website and Anon Aadhaar page on port 5173.</Text>
+          {dep ? <Text style={[s.tiny, { color: C.good, marginTop: 8 }]}>✓ Connected · event contract {short(dep.fairTickets)}</Text>
+            : connErr ? (
+              <>
+                <Text style={[s.tiny, { color: C.bad, marginTop: 8 }]}>{connErr}</Text>
+                <Btn label="Retry" onPress={() => { setHost(h.trim()); retry(); }} />
+              </>
+            ) : <ActivityIndicator color={C.accent} style={{ marginTop: 8 }} />}
         </View>
         <Text style={[s.label, { marginTop: 18 }]}>DEMO: WHO IS USING THIS PHONE?</Text>
         {NAMES.map((n, i) => i === 0 ? null : (
-          <Pressable key={i} onPress={() => { setHost(h.trim()); onPick(i); }} style={({ pressed }) => [s.pick, pressed && { opacity: 0.7 }]}>
+          <Pressable key={i} disabled={!dep} onPress={() => onPick(i)} style={({ pressed }) => [s.pick, (pressed || !dep) && { opacity: 0.5 }]}>
             <Avatar name={n} />
             <View style={{ flex: 1, marginLeft: 12 }}>
               <Text style={s.pickT}>{n}</Text>
               <Text style={s.tiny}>
-                {i === SCALPER ? "Scalper bot · no Aadhaar QR" : isSynthetic(i) ? "Synthetic demo fan · quick join or real proof" : "Real fan · must prove with Anon Aadhaar"}
+                {i === SCALPER ? "Scalper bot · no Aadhaar QR" : isSynthetic(dep, i) ? "Synthetic demo fan · quick join or real proof" : "Real fan · must prove with Anon Aadhaar"}
               </Text>
             </View>
             <Text style={s.muted}>›</Text>
@@ -238,7 +265,7 @@ function Verify({ state, who, me, ft, chain, run, busy }) {
 
       {!isBot && <Btn primary busy={busy} label="🪪  Verify with Anon Aadhaar" onPress={() => setOpen(true)} />}
 
-      {isSynthetic(who) && (
+      {isSynthetic(chain.dep, who) && (
         <Btn busy={busy} label="Quick join (synthetic demo fan)" onPress={() => run("Joined as a synthetic demo fan", () => {
           const p = syntheticProof(NAMES[who]);
           return ft.register(p.nullifier, p.timestamp, p.revealArray, p.groth16Proof);
@@ -263,7 +290,7 @@ function Verify({ state, who, me, ft, chain, run, busy }) {
             <Pressable onPress={() => setOpen(false)} style={s.chip}><Text style={s.chipT}>Close</Text></Pressable>
           </View>
           <WebView
-            source={{ uri: `${chain.aadhaarUrl}?signal=${me}&seed=${deployment.nullifierSeed}` }}
+            source={{ uri: `${chain.aadhaarUrl}?signal=${me}&seed=${chain.dep.nullifierSeed}` }}
             onMessage={(e) => { try { const m = JSON.parse(e.nativeEvent.data); if (m.type === "proof") onProof(m); } catch {} }}
             javaScriptEnabled domStorageEnabled allowFileAccess mixedContentMode="always"
             startInLoadingState renderLoading={() => <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} />}
@@ -286,7 +313,7 @@ function Ticket({ state, who, me, ft, chain, run, busy }) {
   useEffect(() => {
     let alive = true;
     const regen = async () => {
-      const p = await makeGatePayload(chain.wallets[who], t.id);
+      const p = await makeGatePayload(chain.wallets[who], chain.dep.fairTickets, t.id);
       if (alive) { setPayload(p); setLeft(ROTATE_SECONDS); }
     };
     regen();

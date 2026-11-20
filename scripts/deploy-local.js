@@ -84,7 +84,8 @@ async function main() {
     demoKeys: [...Array(20).keys()].map((i) => root.deriveChild(i).privateKey),
     abi: out.abi.fairTickets,
   };
-  const mobileDest = path.join(__dirname, "..", "mobile", "src", "deployment.json");
+  // Served by the website at http://<laptop>:5173/mobile-deployment.json; the Android app downloads it.
+  const mobileDest = path.join(__dirname, "..", "app", "public", "mobile-deployment.json");
   fs.mkdirSync(path.dirname(mobileDest), { recursive: true });
   fs.writeFileSync(mobileDest, JSON.stringify(mobileOut, null, 2));
   console.log("Wrote", mobileDest);
