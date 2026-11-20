@@ -77,14 +77,19 @@ export default function Gate({ state }) {
       experimentalFeatures: { useBarCodeDetectorIfSupported: true },
     });
     camRef.current = cam;
+    // Ignore the same code only for 3 seconds (stops repeat beeps while the phone is held up),
+    // so a second scan of the same ticket is still checked ("Already used").
     let last = "";
+    let lastAt = 0;
     cam.start({ facingMode: "user" }, {
       fps: 15,
       qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.9); return { width: s, height: s }; },
       videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } },
     }, (text) => {
-      if (text === last) return;
+      const now = Date.now();
+      if (text === last && now - lastAt < 3000) return;
       last = text;
+      lastAt = now;
       scan(text, "Camera");
     }).catch((e) => { alert(`Camera error: ${e}`); setCamOn(false); });
     return () => { cam.isScanning && cam.stop().catch(() => {}); };
