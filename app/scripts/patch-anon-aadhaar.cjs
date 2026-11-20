@@ -15,8 +15,43 @@ const pem = fs.readFileSync(path.join(__dirname, "..", "certs", "uidai_offline_p
 const MARK = "/* fair-tickets: uidai 2026 key */";
 
 let js = fs.readFileSync(target, "utf8");
+let changed = false;
+
+// Patch 2: verify the RSA signature with node-forge (pure JS) instead of window.crypto.subtle.
+// crypto.subtle only exists in secure contexts (https or localhost). The Android app opens this
+// page over http://<laptop-ip>:5173, where subtle is undefined, so EVERY real QR failed with
+// "QR code invalid" even when UIDAI's signature was genuine.
+const MARK2 = "/* fair-tickets: forge rsa verify */";
+const subtleStart = "  const binaryDerString = window.atob(pemContents);";
+const subtleEnd = "  return { isSignatureValid, certificate };\n};";
+if (!js.includes(MARK2)) {
+  const a = js.indexOf(subtleStart);
+  const b = js.indexOf(subtleEnd, a);
+  if (a < 0 || b < 0) {
+    console.error("anon-aadhaar patch 2: SDK code changed; not applied.");
+    process.exit(1);
+  }
+  const forgeVerify = `  ${MARK2}
+  let isSignatureValid = false;
+  try {
+    const md = import_node_forge.md.sha256.create();
+    md.update(import_node_forge.util.binary.raw.encode(new Uint8Array(signedData)));
+    isSignatureValid = publicKey.verify(md.digest().bytes(), import_node_forge.util.binary.raw.encode(new Uint8Array(signature)));
+  } catch (e) {
+    isSignatureValid = false;
+  }
+  void pemContents;
+`;
+  js = js.slice(0, a) + forgeVerify + js.slice(b);
+  changed = true;
+  console.log("anon-aadhaar patch: signature check now works over http (node-forge)");
+}
+
 if (js.includes(MARK)) {
-  console.log("anon-aadhaar patch: already applied");
+  if (changed) {
+    fs.writeFileSync(target, js);
+    fs.rmSync(path.join(__dirname, "..", "node_modules", ".vite"), { recursive: true, force: true });
+  } else console.log("anon-aadhaar patch: already applied");
   process.exit(0);
 }
 
