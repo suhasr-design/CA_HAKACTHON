@@ -33,7 +33,11 @@
       ]
     ],
     "extra": {
-      "defaultHost": "192.168.8.97"
-    }
+      "defaultHost": "192.168.8.97",
+      "eas": {
+        "projectId": "9b0947b0-3d9a-4018-9326-3a186d593903"
+      }
+    },
+    "owner": "srujanc"
   }
 }
