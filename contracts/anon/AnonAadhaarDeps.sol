@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.20;
 
 // Pulls the official Anon Aadhaar contracts (PSE / Ethereum Foundation) into the Hardhat build:
 //  - Verifier:    the Groth16 verifier generated from the Anon Aadhaar circuit

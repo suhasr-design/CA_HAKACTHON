@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.20;
 
 // Minimal copy of Chainlink VRF v2.5 request types, so the project does not
 // need the full Chainlink contracts package. Field layout matches Chainlink's

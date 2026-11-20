@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.20;
 
 /// @notice Interface of the Anon Aadhaar on-chain verifier (PSE / Ethereum Foundation).
 /// It checks a Groth16 zero-knowledge proof that the caller holds a genuine,
