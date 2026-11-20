@@ -74,7 +74,7 @@ export function Stat({ label, value, sub, tone = "" }) {
   );
 }
 
-const AVATAR_COLORS = ["#7C5CFF", "#FF6B9A", "#2BD4A4", "#FFB547", "#4CC9F0", "#F72585", "#B5E48C", "#FF8C42"];
+const AVATAR_COLORS = ["#3D5AFE", "#E64980", "#0E9F6E", "#E8930C", "#1C9AD6", "#7B5CFF", "#2F9E44", "#F76707"];
 export function Avatar({ name, size = 32 }) {
   const c = AVATAR_COLORS[[...name].reduce((s, ch) => s + ch.charCodeAt(0), 0) % AVATAR_COLORS.length];
   return (
@@ -130,7 +130,7 @@ export const phaseName = (p) => PHASES[p];
 // ---------------------------------------------------------------- effects
 export function celebrate() {
   try {
-    confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 }, colors: ["#7C5CFF", "#2BD4A4", "#FFB547", "#FF6B9A"] });
+    confetti({ particleCount: 140, spread: 75, origin: { y: 0.6 }, colors: ["#3D5AFE", "#0FA88A", "#E8930C", "#F2557A"] });
   } catch {}
 }
 

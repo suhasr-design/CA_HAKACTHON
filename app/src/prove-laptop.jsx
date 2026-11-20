@@ -78,7 +78,7 @@ function App() {
   if (!mode) return <div style={S.wrap}>Loading…</div>;
   return (
     <div style={S.wrap}>
-      <div style={{ ...S.badge, color: mode === "real" ? "#2BD4A4" : "#FFB547" }}>LAPTOP PROVER · {mode === "real" ? "REAL AADHAAR" : "TEST MODE"}</div>
+      <div style={{ ...S.badge, color: mode === "real" ? C.good : C.amber }}>LAPTOP PROVER · {mode === "real" ? "REAL AADHAAR" : "TEST MODE"}</div>
       <h1 style={S.h1}>Generate a fan’s Aadhaar proof on this laptop</h1>
       <p style={S.p}>
         Phones can’t comfortably run the 584 MB proving step, so they ask for help here. The QR is read <b>only inside this
@@ -106,20 +106,22 @@ function App() {
   );
 }
 
+// Bright theme, same palette as the website (styles.css).
+const C = { bg: "#F5F7FB", card: "#FFFFFF", line: "#DFE5EF", ink: "#18213A", muted: "#5D6781", accent: "#3D5AFE", soft: "#EBEFFF", good: "#0E9F6E", amber: "#A86200" };
 const S = {
-  wrap: { fontFamily: "Inter, Arial, sans-serif", color: "#F2EFFF", background: "#0C0A1D", minHeight: "100vh", padding: "32px 20px", boxSizing: "border-box", maxWidth: 640, margin: "0 auto" },
+  wrap: { fontFamily: "Inter, Arial, sans-serif", color: C.ink, background: C.bg, minHeight: "100vh", padding: "32px 20px", boxSizing: "border-box", maxWidth: 640, margin: "0 auto" },
   badge: { fontSize: 12, letterSpacing: "0.15em", fontWeight: 700 },
-  h1: { fontFamily: "'Space Grotesk', Arial", fontSize: 28, margin: "10px 0" },
-  p: { color: "#A7A0D2", lineHeight: 1.55 },
-  box: { background: "#17133A", border: "1px solid #2C2660", borderRadius: 16, padding: 18, margin: "18px 0" },
-  label: { color: "#A7A0D2", fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" },
+  h1: { fontFamily: "'Space Grotesk', Arial", fontSize: 28, margin: "10px 0", color: C.ink },
+  p: { color: C.muted, lineHeight: 1.55 },
+  box: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 18, margin: "18px 0", boxShadow: "0 4px 16px rgba(24,33,58,0.06)" },
+  label: { color: C.muted, fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" },
   big: { fontFamily: "'Space Grotesk', Arial", fontSize: 24, marginTop: 4 },
-  small: { color: "#A7A0D2", fontSize: 13, lineHeight: 1.5 },
-  req: { display: "block", width: "100%", textAlign: "left", marginTop: 10, padding: "12px 14px", borderRadius: 12, border: "1px solid #3A3380", background: "#1E1948", color: "#F2EFFF", fontSize: 15, cursor: "pointer" },
-  btn: { marginTop: 8, padding: "10px 14px", borderRadius: 10, border: "1px solid #FFB547", background: "transparent", color: "#FFB547", fontSize: 14, cursor: "pointer" },
-  link: { background: "none", border: "none", color: "#8F86FF", cursor: "pointer", fontSize: 14, padding: 0 },
+  small: { color: C.muted, fontSize: 13, lineHeight: 1.5 },
+  req: { display: "block", width: "100%", textAlign: "left", marginTop: 10, padding: "12px 14px", borderRadius: 12, border: "1px solid #C9D3FF", background: C.soft, color: C.ink, fontSize: 15, cursor: "pointer" },
+  btn: { marginTop: 8, padding: "10px 14px", borderRadius: 10, border: `1px solid ${C.amber}`, background: "#FFF6E3", color: C.amber, fontSize: 14, cursor: "pointer" },
+  link: { background: "none", border: "none", color: C.accent, cursor: "pointer", fontSize: 14, padding: 0, fontWeight: 600 },
 };
 
 document.body.style.margin = "0";
-document.body.style.background = "#0C0A1D";
+document.body.style.background = C.bg;
 createRoot(document.getElementById("root")).render(<App />);

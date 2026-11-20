@@ -49,14 +49,14 @@ function LaptopProof() {
     <div style={S.help}>
       <b>Phone too slow? Prove on the laptop</b>
       <p style={{ margin: "6px 0" }}>The proving step needs ~600 MB of memory. A laptop does it in 2–5 minutes; the proof comes back here, locked to this wallet.</p>
-      {state === "idle" && <button style={{ ...S.btn, borderColor: "#8F86FF", color: "#8F86FF" }} onClick={start}>Prove on the laptop</button>}
+      {state === "idle" && <button style={S.primary} onClick={start}>Prove on the laptop</button>}
       {state === "waiting" && (
-        <p style={{ margin: "6px 0", color: "#F2EFFF" }}>
+        <p style={{ margin: "6px 0", color: C.ink }}>
           ⏳ Waiting… On the laptop open <b>{window.location.host}/prove.html</b>, pick this wallet ({signal.slice(0, 6)}…{signal.slice(-4)}) and upload the Aadhaar QR there.
         </p>
       )}
-      {state === "done" && <p style={{ margin: "6px 0", color: "#2BD4A4" }}>✓ Proof received from the laptop. Returning to the app…</p>}
-      {state === "error" && <p style={{ margin: "6px 0", color: "#FF6B8B" }}>Couldn't reach the laptop. <button style={S.btn} onClick={start}>Try again</button></p>}
+      {state === "done" && <p style={{ margin: "6px 0", color: C.good }}>✓ Proof received from the laptop. Returning to the app…</p>}
+      {state === "error" && <p style={{ margin: "6px 0", color: C.bad }}>Couldn't reach the laptop. <button style={S.btn} onClick={start}>Try again</button></p>}
     </div>
   );
 }
@@ -82,7 +82,7 @@ function Bridge({ real }) {
 
   return (
     <div style={S.wrap}>
-      <div style={{ ...S.badge, color: real ? "#2BD4A4" : "#FFB547" }}>
+      <div style={{ ...S.badge, color: real ? C.good : C.amber }}>
         ANON AADHAAR · {real ? "REAL AADHAAR" : "TEST MODE"}
       </div>
       <h1 style={S.h1}>Prove you’re a real, unique person</h1>
@@ -98,7 +98,7 @@ function Bridge({ real }) {
       <div style={S.box}>
         <LogInWithAnonAadhaar nullifierSeed={BigInt(seed)} signal={signal} />
         <p style={S.small}>
-          {aa.status === "logging-in" ? "Generating your proof on this phone… this can take 1–2 minutes. Keep the app open."
+          {aa.status === "logging-in" ? "Generating your proof on this phone… this can take several minutes and may not finish on some phones. If it seems stuck, use “Prove on the laptop” below."
             : bound ? "✓ Proof ready. Returning to the app…"
             : aa.status === "logged-in" ? "This proof belongs to another wallet or event."
             : real ? "Tap Login, then choose a screenshot or photo of your Aadhaar Secure QR."
@@ -144,20 +144,23 @@ function Root() {
   );
 }
 
+// Bright theme, same palette as the website (styles.css).
+const C = { bg: "#F5F7FB", card: "#FFFFFF", well: "#EEF2F8", line: "#DFE5EF", ink: "#18213A", muted: "#5D6781", accent: "#3D5AFE", good: "#0E9F6E", bad: "#E0364A", amber: "#A86200" };
 const S = {
-  wrap: { fontFamily: "Inter, Arial, sans-serif", color: "#F2EFFF", background: "#0C0A1D", minHeight: "100vh", padding: "24px 18px", boxSizing: "border-box", width: "100%", maxWidth: 520, margin: "0 auto", overflowWrap: "anywhere" },
+  wrap: { fontFamily: "Inter, Arial, sans-serif", color: C.ink, background: C.bg, minHeight: "100vh", padding: "24px 18px", boxSizing: "border-box", width: "100%", maxWidth: 520, margin: "0 auto", overflowWrap: "anywhere" },
   badge: { fontSize: 12, letterSpacing: "0.15em", fontWeight: 700 },
-  h1: { fontFamily: "'Space Grotesk', Arial", fontSize: 26, margin: "10px 0" },
-  p: { color: "#A7A0D2", lineHeight: 1.5 },
-  box: { background: "#17133A", border: "1px solid #2C2660", borderRadius: 16, padding: 16, margin: "16px 0" },
-  help: { background: "#121030", border: "1px solid #2C2660", borderRadius: 14, padding: 14, color: "#A7A0D2", fontSize: 13, lineHeight: 1.55, marginBottom: 12 },
+  h1: { fontFamily: "'Space Grotesk', Arial", fontSize: 26, margin: "10px 0", color: C.ink },
+  p: { color: C.muted, lineHeight: 1.5 },
+  box: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 16, padding: 16, margin: "16px 0", boxShadow: "0 4px 16px rgba(24,33,58,0.06)" },
+  help: { background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, color: C.muted, fontSize: 13, lineHeight: 1.55, marginBottom: 12 },
   ol: { margin: "8px 0", paddingLeft: 18 },
-  small: { color: "#A7A0D2", fontSize: 13, lineHeight: 1.5 },
-  btn: { marginTop: 8, padding: "10px 14px", borderRadius: 10, border: "1px solid #FFB547", background: "transparent", color: "#FFB547", fontSize: 14 },
+  small: { color: C.muted, fontSize: 13, lineHeight: 1.5 },
+  btn: { marginTop: 8, padding: "10px 14px", borderRadius: 10, border: `1px solid ${C.amber}`, background: "#FFF6E3", color: C.amber, fontSize: 14 },
+  primary: { marginTop: 8, padding: "11px 16px", borderRadius: 10, border: "none", background: C.accent, color: "#fff", fontSize: 14, fontWeight: 600 },
 };
 
 document.body.style.margin = "0";
-document.body.style.background = "#0C0A1D";
+document.body.style.background = C.bg;
 document.documentElement.style.overflowX = "hidden";
 document.body.style.overflowX = "hidden";
 createRoot(document.getElementById("root")).render(<Root />);
