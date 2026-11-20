@@ -71,6 +71,43 @@ Show the phone to the judges, or mirror its screen. Tap **Verify with Anon Aadha
 
 - **"Why does this need a blockchain?"** The seat list, the draw and the ticket rules must be things the organiser can’t change. On the platform’s own server, fans would be back to "trust us".
 - **"What stops someone borrowing relatives’ Aadhaar QRs?"** Each one is still one human and one entry, and tickets can’t be transferred. Our simulation shows a scalper with 25 borrowed identities gets about 2.5% of seats, against about 77% in a normal queue. Production could also re-prove the same nullifier at the gate.
-- **"Is the Aadhaar part real?"** It uses the official Anon Aadhaar circuit, browser prover and on-chain verifier, in **test mode** with UIDAI’s test key. Production swaps in the production key hash, with no code changes.
-- **"What’s simulated?"** Chainlink VRF on the local chain (the contract uses the real VRF v2.5 callback), the synthetic crowd (labelled), and test ETH payments.
-- **"Gas at stadium scale?"** Layer-2 (Polygon); the shuffle is batched; the gate reads the list once before doors open.
+- **"Is the Aadhaar part real?"** Yes. Real Aadhaar Secure QRs (mAadhaar / e-Aadhaar, including the new V5 format) are verified against **UIDAI’s real signing keys**, including the current 2026 key. We tested it end to end with a real QR: the proof is accepted on-chain, and the same proof for another wallet is rejected.
+- **"What’s simulated?"** The local chain and test ETH (stand-in for UPI payment), Chainlink VRF on the local chain (on Quai we use commit-reveal), and the labelled synthetic crowd.
+- **"Gas at stadium scale?"** ~370k gas per registration → ~130 per Quai block; the shuffle is batched and anyone can run it; position lookup is O(1); gates sync the ticket list in pages.
+
+## “If there are 100 seats and I’m the 101st?”
+
+> “Nobody is ‘101st’ by speed. Everyone who registers in the window gets the same chance. When registration closes, the list is frozen on-chain, *then* a random seed is produced, and the whole list is shuffled. Positions 1–100 win. Whoever lands at position 101 is **waitlist #1**: the first seat that’s returned or left unclaimed is offered to them automatically, at face value. Anyone can re-run the shuffle from public data and get the identical order.”
+
+**Show it:** Home → the “101 people, 100 seats” card (live numbers). Organiser → Add synthetic crowd (137 for 100 seats) → draw → the lottery board shows winners 1–100 and Waitlist #1, #2…
+
+## Earlier flaws and how they’re fixed now
+
+| Flaw (from the review) | Fix in the build | Where to show it |
+|---|---|---|
+| **Relay attack** (scalper streams a live QR) | **Gate challenge code:** each gate shows a 4-digit code that changes every 20 s; the fan types it, the QR is signed for that code. A QR made earlier or elsewhere fails. | Gate → “Relayed / old QR” → REJECT |
+| **Clock drift** | Same fix: the gate checks its **own** code, not the phone’s clock. | Gate code card |
+| **Duplicate entry across gates** | **Gate sync** over the venue LAN: check-and-mark is atomic, so Gate B refuses a ticket used at Gate A. If the LAN drops, gates keep working locally and report conflicts on reconnect. | Two browser tabs: Gate A and Gate B |
+| **Phone / wallet selling** | **Help-desk ID re-check:** a fresh Aadhaar proof must give the **same anonymous code (nullifier)** as at registration. A buyer can’t produce the seller’s Aadhaar. | Gate → Help desk |
+| **Dead or lost phone** | Same help desk: the fan re-proves with Aadhaar and is admitted without the phone. | Gate → Help desk |
+| **Key custody** | The fan’s wallet is **generated on the phone** and kept in Android’s secure storage (Keystore-backed). | App → “Use my own wallet” |
+| **Aadhaar doesn’t cover everyone** (foreign fans, minors) | **Assisted ID desk:** staff check a passport in person; only a hash goes on-chain, under a **public quota fixed before the sale**; one registration per document. | Organiser → Assisted ID desk |
+| **Bots draining sponsored gas** | The gas sponsor pays **only for a valid Aadhaar proof bound to that wallet, once per person**. | Bot gets “Gas sponsor refused” |
+| **Fake apps** | App and website both show the official event contract; anyone can check any ticket on the public Check page. | Footer of the app, Check page |
+| **“Polygon Layer-2” wording** | We now deploy on **Quai Network (Orchard testnet)**. Don’t say “Polygon Layer-2”. | — |
+| **Crypto tax / fiat, chargebacks** | Prices shown in ₹; on-chain payment is final (no chargebacks). Production: UPI into an escrow contract. *Roadmap, not built.* | — |
+
+**Be honest about what’s left:** a scalper who streams a live video call with the real holder could still relay a gate code in real time; the next layer is an NFC tap at the gate. Say it before they ask.
+
+## Where else this works (area of use)
+
+Concerts and festivals · IPL / cricket matches (multiple gates) · temple darshan slots (one devotee, one slot) · Tatkal-style quotas · hospital OPD tokens · college fests and exam seats. Anywhere demand exceeds supply and “one person, one fair chance” must be verifiable.
+
+## New demo flow (real data)
+
+1. **Organiser → Create an event:** real name, venue, date, ₹ price, 100 seats (+ sponsor/holds declared). ~30 s.
+2. **Phone → Use my own wallet → Verify with Anon Aadhaar → Prove on the laptop** (`/prove.html`, upload the Secure QR). The sponsor pays gas only because the proof is valid; the phone registers.
+3. **Organiser → Add synthetic crowd (137)** → Close registration → Request draw → Deliver randomness → Run shuffle → Reveal seats → Synthetic winners pay.
+4. **Phone:** won a seat (pay) or waitlist #N with “drawn #k of 138”.
+5. **Gate (two tabs, Gate A and B):** download list → the phone types Gate A’s code → ENTER; the same ticket at Gate B → REJECT “already entered at Gate A”; “Relayed / old QR” → REJECT.
+6. **Help desk:** enter the ticket number → fan re-proves → “same person who registered” → admit.

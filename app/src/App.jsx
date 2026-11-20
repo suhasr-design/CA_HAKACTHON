@@ -135,7 +135,7 @@ export default function App() {
           {state && tab === "gate" && <Gate {...props} />}
           {state && tab === "check" && <Check {...props} />}
         </main>
-        <footer className="foot">Phase: {state ? phaseName(state.phase) : "—"} · Contract {short(deployment.fairTickets)} · All fans, payments and the crowd are synthetic demo data.</footer>
+        <footer className="foot">Phase: {state ? phaseName(state.phase) : "—"} · Contract {short(deployment.fairTickets)} · Local demo chain (test ETH). The synthetic crowd is labelled; real fans prove with Aadhaar.</footer>
       </div>
     </ExplainCtx.Provider>
   );
