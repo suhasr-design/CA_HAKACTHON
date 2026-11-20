@@ -13,7 +13,7 @@ const CONFIG = {
   claimWindow: 24 * 60 * 60,       // 24 hours for winners to pay
   nullifierSeed: 20260118n,        // unique per event -> nullifiers can't be linked across events
   seats: { publicSeats: 8, sponsorSeats: 2, holdSeats: 2 },
-  registrationMinutes: 30,
+  registrationMinutes: 120,
   buybackDays: 7,
 };
 

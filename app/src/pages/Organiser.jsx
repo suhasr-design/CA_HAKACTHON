@@ -36,7 +36,7 @@ export default function Organiser({ state, run, log }) {
     next = { title: "Registration is open", body: `Fans are registering. It closes in ${fmtLeft(state.regCloses - now)}. Add the synthetic crowd, let a real fan prove live, then jump the clock.`,
       actions: [
         { label: `Add synthetic crowd (${(deployment.syntheticAccounts || []).length})`, fn: crowd },
-        { label: "⏩ Close registration (+31 min)", fn: () => run("Clock moved forward 31 min", () => fastForward(31 * 60)), ghost: true },
+        { label: "⏩ Close registration now", fn: () => run("Registration closed (clock moved to closing time)", () => fastForward(state.regCloses - now + 60)), ghost: true },
       ] };
   } else if (state.phase === 1) {
     next = { title: "Registration closed: request the random seed", body: "The entrant list is now frozen. Only now do we ask Chainlink VRF for randomness, so nobody can time their entry.",
