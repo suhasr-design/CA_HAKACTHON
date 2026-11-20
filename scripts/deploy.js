@@ -10,7 +10,7 @@
 //
 // Contracts deployed:
 //   1. Verifier       official Anon Aadhaar Groth16 verifier
-//   2. AnonAadhaar    official Anon Aadhaar contract, UIDAI TEST public-key hash
+//   2. AnonAadhaarMultiKey  Anon Aadhaar check against UIDAI's real signing keys (fixed, no admin)
 //   3. FairTicketsCommitReveal   the event (commit-reveal randomness: Chainlink VRF isn't on Quai)
 // Then: commit the seat inventory, commit the randomness seed, open registration.
 const fs = require("fs");
@@ -21,8 +21,12 @@ const hre = require("hardhat");
 const { deployMetadata } = hre;
 const { buildInventory } = require("./lib/inventory");
 
+const { UIDAI_KEY_HASHES, TEST_KEY_HASH } = require("./lib/aadhaarKeys");
+
 const EXPECTED_CHAIN_ID = 15000n;
-const TEST_PUBKEY_HASH = "15134874015316324267425466444584014077184337590635665158241104437045239495873"; // @anon-aadhaar/core
+// AADHAAR_MODE=real (default): only UIDAI's real signing keys. AADHAAR_MODE=test: Anon Aadhaar test key.
+const AADHAAR_MODE = (process.env.AADHAAR_MODE || "real").toLowerCase() === "test" ? "test" : "real";
+const KEY_HASHES = AADHAAR_MODE === "real" ? UIDAI_KEY_HASHES : [TEST_KEY_HASH];
 const EVENT = {
   name: "Coldplay · Bengaluru · Demo Night",
   facePrice: 10n ** 16n,          // 0.01 QUAI
@@ -52,7 +56,8 @@ async function main() {
   if (net.chainId !== EXPECTED_CHAIN_ID) throw new Error(`STOP: chain ID ${net.chainId} is not Orchard Cyprus-1 (15000).`);
   if (balance === 0n) throw new Error(`STOP: deployer has no testnet QUAI. Ask the organisers / Quai Discord to send Orchard QUAI to ${wallet.address} (orchard.faucet.quai.network is offline).`);
 
-  console.log("\nPlan: deploy Verifier, AnonAadhaar (UIDAI test key), FairTicketsCommitReveal; then commitInventory, commitSeed, openRegistration.");
+  console.log(`Aadhaar mode  : ${AADHAAR_MODE.toUpperCase()} (${KEY_HASHES.length} accepted UIDAI key hash${KEY_HASHES.length > 1 ? "es" : ""})`);
+  console.log("\nPlan: deploy Verifier, AnonAadhaarMultiKey, FairTicketsCommitReveal; then commitInventory, commitSeed, openRegistration.");
   console.log("Admin powers of the deployer (organiser): commit inventory/seed once, open registration, reveal the seed,");
   console.log("withdraw proceeds, anchor gate logs. It CANNOT change rules, prices, the draw result or transfer tickets.");
   if (process.env.DEPLOY_CONFIRM !== "yes") {
@@ -64,9 +69,29 @@ async function main() {
   const record = { network: "Quai Orchard Cyprus-1", chainId: 15000, rpc: hre.network.config.url, deployer: wallet.address, deployedAt: new Date().toISOString(), contracts: {}, setupTxs: {} };
   const explorer = (a) => `https://orchard.quaiscan.io/address/${a}`;
 
+  // Upload all metadata to IPFS BEFORE broadcasting anything, with retries: an IPFS outage must not
+  // leave a half-finished deployment on-chain.
+  const ipfs = {};
+  for (const name of ["Verifier", "AnonAadhaarMultiKey", "FairTicketsCommitReveal"]) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const h = await deployMetadata.pushMetadataToIPFS(name);
+        if (typeof h !== "string" || h.length !== 46) throw new Error(`bad IPFS hash "${h}"`);
+        ipfs[name] = h;
+        console.log(`IPFS metadata ${name}: ${h}`);
+        break;
+      } catch (e) {
+        const msg = String(e.message || e).split("\n")[0].slice(0, 120);
+        if (attempt >= 5) throw new Error(`STOP: IPFS metadata upload failed for ${name} (${msg}). Nothing was broadcast.`);
+        console.log(`IPFS upload ${name} failed (attempt ${attempt}/5: ${msg}); retrying in 30s…`);
+        await new Promise((r) => setTimeout(r, 30000));
+      }
+    }
+  }
+
   async function deploy(file, name, args = []) {
     const json = artifact(file, name);
-    const ipfsHash = await deployMetadata.pushMetadataToIPFS(name);
+    const ipfsHash = ipfs[name];
     const factory = new quais.ContractFactory(json.abi, json.bytecode, wallet, ipfsHash);
     const c = await factory.deploy(...args);
     const txHash = c.deploymentTransaction().hash;
@@ -79,7 +104,7 @@ async function main() {
   }
 
   const verifier = await deploy("@anon-aadhaar/contracts/src/Verifier.sol", "Verifier");
-  const anon = await deploy("@anon-aadhaar/contracts/src/AnonAadhaar.sol", "AnonAadhaar", [await verifier.getAddress(), TEST_PUBKEY_HASH]);
+  const anon = await deploy("contracts/anon/AnonAadhaarMultiKey.sol", "AnonAadhaarMultiKey", [await verifier.getAddress(), KEY_HASHES]);
   const ft = await deploy("contracts/FairTicketsCommitReveal.sol", "FairTicketsCommitReveal", [
     EVENT.name, EVENT.facePrice, EVENT.offerWindow, EVENT.claimWindow, await anon.getAddress(), EVENT.nullifierSeed,
   ]);
@@ -101,6 +126,7 @@ async function main() {
   const now = Math.floor(Date.now() / 1000);
   await send("openRegistration", ft.openRegistration(now + EVENT.registrationMinutes * 60, now + EVENT.buybackDays * 86400));
 
+  record.aadhaar = { mode: AADHAAR_MODE, acceptedKeyHashes: KEY_HASHES.map(String) };
   record.event = { ...EVENT, facePrice: EVENT.facePrice.toString(), nullifierSeed: EVENT.nullifierSeed.toString(), inventoryRoot: inv.root, seedCommitment: commitment };
 
   const dir = path.join(__dirname, "..", "deployments");
