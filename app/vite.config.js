@@ -4,6 +4,8 @@ import { resolve } from "path";
 
 export default defineConfig({
   plugins: [react()],
+  // The Anon Aadhaar SDK's dependencies require("crypto") on Node-only paths; give the browser a stub.
+  resolve: { alias: { crypto: resolve(__dirname, "src/shims/crypto.js") } },
   // host: true -> reachable from phones on the same Wi-Fi (the Android app opens /aadhaar.html).
   server: { port: 5173, host: true },
   build: {

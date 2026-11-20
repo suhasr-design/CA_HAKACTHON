@@ -109,7 +109,7 @@ function FanApp({ host, dep, who, setWho }) {
         {state ? <Fan state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} /> : null}
 
         <Text style={[s.tiny, { textAlign: "center", marginTop: 24 }]}>
-          Demo · local test blockchain at {host} · test ETH · Anon Aadhaar test mode
+          Demo · local test blockchain at {host} · test ETH · Anon Aadhaar
         </Text>
       </ScrollView>
       {toast ? <Toast toast={toast} onClose={() => setToast(null)} /> : null}
@@ -261,7 +261,7 @@ function Verify({ state, who, me, ft, chain, run, busy }) {
   return (
     <Card>
       <Text style={s.h3}>Prove you’re a real, unique person</Text>
-      <Text style={s.muted}>Your phone makes a zero-knowledge proof from a test Aadhaar QR. The event learns that you’re a unique resident, not who you are.</Text>
+      <Text style={s.muted}>Your phone makes a zero-knowledge proof from your Aadhaar Secure QR (mAadhaar app or e-Aadhaar PDF). The event learns that you’re a unique, UIDAI-verified person, never who you are.</Text>
 
       {!isBot && <Btn primary busy={busy} label="🪪  Verify with Anon Aadhaar" onPress={() => setOpen(true)} />}
 

@@ -17,8 +17,10 @@ const CONFIG = {
   buybackDays: 7,
 };
 
-// UIDAI *test* public-key hash used by Anon Aadhaar test mode (from @anon-aadhaar/core constants).
-const TEST_PUBKEY_HASH = 15134874015316324267425466444584014077184337590635665158241104437045239495873n;
+const { UIDAI_KEY_HASHES, TEST_KEY_HASH } = require("./lib/aadhaarKeys");
+// AADHAAR_MODE=real (default): only QRs signed by UIDAI's real keys are accepted.
+// AADHAAR_MODE=test: Anon Aadhaar test QRs (anyone can generate them; for rehearsals only).
+const AADHAAR_MODE = (process.env.AADHAAR_MODE || "real").toLowerCase() === "test" ? "test" : "real";
 // Demo accounts 2..18 form the synthetic crowd. Account 1 (Asha) and 19 (Scalper) are NOT
 // synthetic: Asha must register with a real zero-knowledge proof; the Scalper has none.
 const SYNTHETIC_ACCOUNTS = [...Array(17).keys()].map((i) => i + 2);
@@ -28,9 +30,12 @@ async function main() {
   const [organiser] = signers;
   console.log("Organiser:", organiser.address);
 
-  // Official Anon Aadhaar contracts with the test public key, behind the demo router.
+  // Official Anon Aadhaar Groth16 verifier, checked against UIDAI's real keys (or the test key),
+  // behind the demo router (which only adds the synthetic crowd accounts).
   const groth16 = await (await ethers.getContractFactory("Verifier")).deploy();
-  const anon = await (await ethers.getContractFactory("AnonAadhaar")).deploy(await groth16.getAddress(), TEST_PUBKEY_HASH);
+  const keyHashes = AADHAAR_MODE === "real" ? UIDAI_KEY_HASHES : [TEST_KEY_HASH];
+  const anon = await (await ethers.getContractFactory("AnonAadhaarMultiKey")).deploy(await groth16.getAddress(), keyHashes);
+  console.log(`Anon Aadhaar mode: ${AADHAAR_MODE.toUpperCase()} (${keyHashes.length} accepted key${keyHashes.length > 1 ? "s" : ""})`);
   const syntheticFans = SYNTHETIC_ACCOUNTS.map((i) => signers[i].address);
   const aadhaar = await (await ethers.getContractFactory("DemoAadhaarRouter")).deploy(await anon.getAddress(), syntheticFans);
   const vrf = await (await ethers.getContractFactory("MockVRFCoordinator")).deploy();
@@ -56,7 +61,8 @@ async function main() {
     vrfCoordinator: await vrf.getAddress(),
     aadhaarRouter: await aadhaar.getAddress(),
     anonAadhaar: await anon.getAddress(),
-    anonAadhaarPubkeyHash: TEST_PUBKEY_HASH.toString(),
+    aadhaarMode: AADHAAR_MODE,
+    anonAadhaarKeyHashes: keyHashes.map(String),
     syntheticAccounts: SYNTHETIC_ACCOUNTS,
     nullifierSeed: CONFIG.nullifierSeed.toString(),
     abi: {
@@ -80,6 +86,7 @@ async function main() {
     chainId: out.chainId,
     fairTickets: out.fairTickets,
     nullifierSeed: out.nullifierSeed,
+    aadhaarMode: AADHAAR_MODE,
     syntheticAccounts: SYNTHETIC_ACCOUNTS,
     demoKeys: [...Array(20).keys()].map((i) => root.deriveChild(i).privateKey),
     abi: out.abi.fairTickets,

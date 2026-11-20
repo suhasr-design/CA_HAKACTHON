@@ -114,7 +114,7 @@ export default function App() {
           <div className="statusbar">
             <span className="live-dot" /> Live on local chain · block {state.blockNumber}
             <PhaseStepper phase={state.phase} />
-            <span className="demo-note">Demo: local Hardhat chain · test ETH · Anon Aadhaar <b>test mode</b> · mock Chainlink VRF · synthetic crowd labelled</span>
+            <span className="demo-note">Demo: local Hardhat chain · test ETH · Anon Aadhaar <b>{deployment.aadhaarMode === "test" ? "test mode" : "REAL Aadhaar (UIDAI keys)"}</b> · mock Chainlink VRF · synthetic crowd labelled</span>
           </div>
         )}
 

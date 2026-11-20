@@ -1,9 +1,13 @@
 // Anon Aadhaar bridge for the Fair Tickets Android app.
 // The official Anon Aadhaar prover runs in a browser engine, so the mobile app opens this
-// page in a WebView. It makes a REAL zero-knowledge proof (test mode) bound to the fan's
-// wallet (signal) and the event (nullifier seed), then hands it back to the app, which
-// sends the registration transaction itself.
-import React, { useEffect, useRef } from "react";
+// page in a WebView. It makes a REAL zero-knowledge proof bound to the fan's wallet (signal)
+// and the event (nullifier seed), then hands it back to the app, which sends the registration
+// transaction itself.
+//
+// Mode comes from the deployment the laptop is serving (/mobile-deployment.json):
+//   real -> genuine Aadhaar Secure QR, checked against UIDAI's real signing keys
+//   test -> Anon Aadhaar test QR (rehearsals only)
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AnonAadhaarProvider, LogInWithAnonAadhaar, useAnonAadhaar, useProver } from "@anon-aadhaar/react";
 import { hash as aaHash, packGroth16Proof } from "@anon-aadhaar/core";
@@ -18,7 +22,7 @@ const send = (msg) => {
   else window.parent?.postMessage(text, "*");
 };
 
-function Bridge() {
+function Bridge({ real }) {
   const [aa, startReq] = useAnonAadhaar();
   const [, latest] = useProver();
   const sent = useRef(false);
@@ -39,31 +43,75 @@ function Bridge() {
 
   return (
     <div style={S.wrap}>
-      <div style={S.badge}>ANON AADHAAR · TEST MODE</div>
+      <div style={{ ...S.badge, color: real ? "#2BD4A4" : "#FFB547" }}>
+        ANON AADHAAR · {real ? "REAL AADHAAR" : "TEST MODE"}
+      </div>
       <h1 style={S.h1}>Prove you’re a real, unique person</h1>
-      <p style={S.p}>Upload a <b>test</b> Aadhaar QR. Your phone creates a zero-knowledge proof. The event learns only that you are a unique resident, not your name or Aadhaar number.</p>
+      {real ? (
+        <p style={S.p}>
+          Upload your <b>Aadhaar Secure QR</b>. Your phone checks UIDAI’s signature and creates a
+          zero-knowledge proof <b>on this device</b>. Nothing from your Aadhaar leaves the phone: the event
+          only learns “unique, UIDAI-verified person”, never your name, number, address or photo.
+        </p>
+      ) : (
+        <p style={S.p}>Upload a <b>test</b> Aadhaar QR. Your phone creates a zero-knowledge proof. The event learns only that you are a unique resident.</p>
+      )}
       <div style={S.box}>
         <LogInWithAnonAadhaar nullifierSeed={BigInt(seed)} signal={signal} />
         <p style={S.small}>
-          {aa.status === "logging-in" ? "Generating your proof… the first one can take a minute."
+          {aa.status === "logging-in" ? "Generating your proof on this phone… this can take 1–2 minutes. Keep the app open."
             : bound ? "✓ Proof ready. Returning to the app…"
             : aa.status === "logged-in" ? "This proof belongs to another wallet or event."
+            : real ? "Tap Login, then choose a screenshot or photo of your Aadhaar Secure QR."
             : "Tap Login, then choose your test QR image."}
         </p>
         {p && !bound && <button style={S.btn} onClick={() => { sent.current = false; startReq({ type: "logout" }); }}>Clear and prove again</button>}
       </div>
-      <p style={S.small}>No test QR? Generate one at documentation.anon-aadhaar.pse.dev/docs/generate-qr. Test data only; never use a real Aadhaar.</p>
+      {real ? (
+        <div style={S.help}>
+          <b>Where do I get my Secure QR?</b>
+          <ol style={S.ol}>
+            <li><b>mAadhaar app</b> → My Aadhaar → <b>Show QR Code</b> → take a screenshot.</li>
+            <li>Or <b>e-Aadhaar PDF</b> from myaadhaar.uidai.gov.in → the large QR code on the PDF (screenshot or crop it).</li>
+          </ol>
+          The old printed QR on PVC/paper cards from before 2019 doesn't contain a UIDAI signature and won't work.
+        </div>
+      ) : (
+        <p style={S.small}>No test QR? Generate one at documentation.anon-aadhaar.pse.dev/docs/generate-qr.</p>
+      )}
       <p style={{ ...S.small, wordBreak: "break-all" }}>Bound to wallet {signal.slice(0, 8)}…{signal.slice(-6)}</p>
     </div>
   );
 }
 
+function Root() {
+  const forced = params.get("mode");
+  const [mode, setMode] = useState(forced === "real" || forced === "test" ? forced : null);
+  useEffect(() => {
+    if (mode) return;
+    fetch("/mobile-deployment.json", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setMode(d.aadhaarMode === "test" ? "test" : "real"))
+      .catch(() => setMode("real"));
+  }, [mode]);
+  if (!mode) return <div style={S.wrap}><p style={S.p}>Loading…</p></div>;
+  const real = mode === "real";
+  // key forces a fresh provider (and prover state) if the mode ever changes
+  return (
+    <AnonAadhaarProvider key={mode} _useTestAadhaar={!real} _appName="Fair Tickets">
+      <Bridge real={real} />
+    </AnonAadhaarProvider>
+  );
+}
+
 const S = {
   wrap: { fontFamily: "Inter, Arial, sans-serif", color: "#F2EFFF", background: "#0C0A1D", minHeight: "100vh", padding: "24px 18px", boxSizing: "border-box", width: "100%", maxWidth: 520, margin: "0 auto", overflowWrap: "anywhere" },
-  badge: { color: "#2BD4A4", fontSize: 12, letterSpacing: "0.15em", fontWeight: 700 },
+  badge: { fontSize: 12, letterSpacing: "0.15em", fontWeight: 700 },
   h1: { fontFamily: "'Space Grotesk', Arial", fontSize: 26, margin: "10px 0" },
   p: { color: "#A7A0D2", lineHeight: 1.5 },
   box: { background: "#17133A", border: "1px solid #2C2660", borderRadius: 16, padding: 16, margin: "16px 0" },
+  help: { background: "#121030", border: "1px solid #2C2660", borderRadius: 14, padding: 14, color: "#A7A0D2", fontSize: 13, lineHeight: 1.55, marginBottom: 12 },
+  ol: { margin: "8px 0", paddingLeft: 18 },
   small: { color: "#A7A0D2", fontSize: 13, lineHeight: 1.5 },
   btn: { marginTop: 8, padding: "10px 14px", borderRadius: 10, border: "1px solid #FFB547", background: "transparent", color: "#FFB547", fontSize: 14 },
 };
@@ -72,8 +120,4 @@ document.body.style.margin = "0";
 document.body.style.background = "#0C0A1D";
 document.documentElement.style.overflowX = "hidden";
 document.body.style.overflowX = "hidden";
-createRoot(document.getElementById("root")).render(
-  <AnonAadhaarProvider _useTestAadhaar={true} _appName="Fair Tickets">
-    <Bridge />
-  </AnonAadhaarProvider>
-);
+createRoot(document.getElementById("root")).render(<Root />);
