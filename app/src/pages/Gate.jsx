@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ethers } from "ethers";
-import { Html5Qrcode } from "html5-qrcode";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { NAMES, addressOf, deployment, errorText, fairTickets, nameOf, provider, wallet } from "../chain";
 import { makePayload, verifyPayload } from "../gateQr";
 import { Avatar, Card, Explain, Stat, beep } from "../ui.jsx";
@@ -62,17 +62,27 @@ export default function Gate({ state }) {
     { key: "shot", icon: "🖼", label: "Screenshot", sub: "same QR, 2 minutes old", need: true,
       fn: async () => scan(await makePayload(wallet(fanIdx), fanTicket.id, { ageSeconds: 120 }), `Screenshot of ${fanName}’s QR`) },
     { key: "forge", icon: "🧪", label: "Forged copy", sub: "made without the holder’s key", need: true,
-      fn: async () => scan(await makePayload(ethers.Wallet.createRandom(), fanTicket.id, { holderOverride: demoFan }), `Forged copy of ${fanName}’s ticket`) },
+      fn: async () => scan(await makePayload(ethers.Wallet.createRandom(), fanTicket.id), `Forged copy of ${fanName}’s ticket`) },
     { key: "fake", icon: "🛑", label: "Fake ticket", sub: "bought on social media", need: false,
       fn: async () => scan(await makePayload(ethers.Wallet.createRandom(), 999), "Fake ticket #999 from Instagram") },
   ];
 
   useEffect(() => {
     if (!camOn) return;
-    const cam = new Html5Qrcode("gate-cam");
+    // Dense QR (it carries a full signature): use the browser's native BarcodeDetector when
+    // available, a high-resolution stream and a large scan box.
+    const cam = new Html5Qrcode("gate-cam", {
+      verbose: false,
+      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    });
     camRef.current = cam;
     let last = "";
-    cam.start({ facingMode: "environment" }, { fps: 8, qrbox: 220 }, (text) => {
+    cam.start({ facingMode: "user" }, {
+      fps: 15,
+      qrbox: (w, h) => { const s = Math.floor(Math.min(w, h) * 0.9); return { width: s, height: s }; },
+      videoConstraints: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+    }, (text) => {
       if (text === last) return;
       last = text;
       scan(text, "Camera");

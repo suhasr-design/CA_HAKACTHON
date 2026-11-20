@@ -56,14 +56,13 @@ export function fakeProof() {
   return { nullifier: r(), timestamp: BigInt(Math.floor(Date.now() / 1000)), revealArray: [0n, 0n, 0n, 0n], groth16Proof: Array.from({ length: 8 }, r) };
 }
 
-// Rotating gate QR: identical format to the web gate scanner (app/src/gateQr.js).
+// Rotating gate QR, compact v2 format (see app/src/gateQr.js): "FT2.<ticketId>.<unixSeconds>.<base64 sig>".
+// The gate recovers the holder from the signature, so the QR stays small and easy for webcams to read.
 export const ROTATE_SECONDS = 30;
 export async function makeGatePayload(signer, contractAddress, ticketId) {
-  const c = contractAddress;
-  const h = signer.address;
   const ts = Math.floor(Date.now() / 1000);
-  const s = await signer.signMessage(`FairTickets|${c.toLowerCase()}|${ticketId}|${h.toLowerCase()}|${ts}`);
-  return JSON.stringify({ v: 1, c, t: Number(ticketId), h, ts, s });
+  const sig = await signer.signMessage(`FairTickets2|${contractAddress.toLowerCase()}|${ticketId}|${ts}`);
+  return `FT2.${Number(ticketId)}.${ts}.${ethers.encodeBase64(sig)}`;
 }
 
 export function errorText(e) {

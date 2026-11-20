@@ -340,7 +340,7 @@ function Ticket({ state, who, me, ft, chain, run, busy }) {
           <Text style={s.returning}>Being returned: waiting for the next fan on the waitlist to accept.</Text>
         ) : (
           <View style={s.qrRow}>
-            <View style={s.qrBox}>{payload ? <QRCode value={payload} size={190} color="#16132E" backgroundColor="#FFFFFF" /> : <ActivityIndicator />}</View>
+            <View style={s.qrBox}>{payload ? <QRCode value={payload} size={230} ecl="L" quietZone={14} color="#000000" backgroundColor="#FFFFFF" /> : <ActivityIndicator />}</View>
             <View style={{ alignItems: "center", marginTop: 12 }}>
               <Ring left={left} total={ROTATE_SECONDS} />
               <Text style={s.ticketNote}>New code every {ROTATE_SECONDS}s, signed by your key. Screenshots expire.</Text>
