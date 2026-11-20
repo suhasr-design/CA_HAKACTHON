@@ -67,6 +67,9 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
     // Lottery
     uint256 public randomSeed;
     uint256 public shuffledUpTo;
+    // Final shuffled position + 1 (0 = not drawn yet), written as the shuffle fixes each slot,
+    // so positionOf is O(1) even with lakhs of entrants.
+    mapping(address => uint256) private _positionPlusOne;
 
     // Sale, buyback and waitlist
     uint64 public claimDeadline;
@@ -226,7 +229,10 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
         randomSeed = seed;
         phase = Phase.Shuffling;
         emit RandomnessReceived(seed);
-        if (_entrants.length <= 1) _openSale();
+        if (_entrants.length <= 1) {
+            if (_entrants.length == 1) _positionPlusOne[_entrants[0]] = 1;
+            _openSale();
+        }
     }
 
     /// @notice Run `steps` steps of the Fisher–Yates shuffle. Anyone can call; batched for large events.
@@ -237,11 +243,16 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
         if (end > n - 1) end = n - 1;
         for (; i < end; i++) {
             uint256 j = i + (uint256(keccak256(abi.encode(randomSeed, i))) % (n - i));
-            if (j != i) (_entrants[i], _entrants[j]) = (_entrants[j], _entrants[i]);
+            address picked = _entrants[j];
+            if (j != i) (_entrants[i], _entrants[j]) = (picked, _entrants[i]);
+            _positionPlusOne[picked] = i + 1; // slot i is now final
         }
         shuffledUpTo = i;
         emit ShuffleProgress(i, n);
-        if (i >= n - 1) _openSale();
+        if (i >= n - 1) {
+            _positionPlusOne[_entrants[n - 1]] = n; // the last slot is fixed by elimination
+            _openSale();
+        }
     }
 
     function _openSale() internal {
@@ -412,15 +423,45 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
         return _winnerCount();
     }
 
-    /// @notice Position of `fan` in the (shuffled) list, or type(uint256).max. Demo-scale helper.
+    /// @notice Final position of `fan` in the shuffled list (0 = first winner), or type(uint256).max
+    /// if they didn't register or their slot hasn't been drawn yet. O(1) at any event size.
     function positionOf(address fan) external view returns (uint256) {
-        for (uint256 i = 0; i < _entrants.length; i++) {
-            if (_entrants[i] == fan) return i;
-        }
-        return type(uint256).max;
+        uint256 p = _positionPlusOne[fan];
+        return p == 0 ? type(uint256).max : p - 1;
     }
 
-    /// @notice All live tickets — what a gate scanner caches before doors open. Demo-scale helper.
+    /// @notice A page of the entrant list (shuffled order once drawn), for large events.
+    function getEntrantsPage(uint256 start, uint256 count) external view returns (address[] memory page) {
+        uint256 n = _entrants.length;
+        if (start >= n) return new address[](0);
+        uint256 end = start + count > n ? n : start + count;
+        page = new address[](end - start);
+        for (uint256 i = start; i < end; i++) page[i - start] = _entrants[i];
+    }
+
+    /// @notice Live tickets with ids in [fromId, fromId + count): gate scanners sync in pages.
+    function getLiveTicketsPage(uint256 fromId, uint256 count)
+        external
+        view
+        returns (uint256[] memory ids, address[] memory holders, uint256[] memory seats)
+    {
+        if (fromId == 0) fromId = 1;
+        uint256 end = fromId + count > nextTokenId ? nextTokenId : fromId + count;
+        uint256 n;
+        for (uint256 t = fromId; t < end; t++) if (ticketStatus(t) == TicketStatus.Valid) n++;
+        ids = new uint256[](n);
+        holders = new address[](n);
+        seats = new uint256[](n);
+        uint256 k;
+        for (uint256 t = fromId; t < end; t++) {
+            if (ticketStatus(t) == TicketStatus.Valid) {
+                (ids[k], holders[k], seats[k]) = (t, ownerOf(t), tokenSeat[t]);
+                k++;
+            }
+        }
+    }
+
+    /// @notice All live tickets — fine for small events; large events use getLiveTicketsPage.
     function getLiveTickets()
         external
         view

@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 const { loadFixture, time, mine } = require("@nomicfoundation/hardhat-toolbox/network-helpers");
-const { buildInventory } = require("../scripts/lib/inventory");
+const { buildInventory, revealArgs } = require("../scripts/lib/inventory");
 const { mockAadhaarProof } = require("../scripts/lib/mockProof");
 
 const PRICE = ethers.parseEther("0.01");
@@ -18,7 +18,7 @@ describe("FairTicketsCommitReveal (Quai Orchard randomness)", () => {
     );
     const inv = buildInventory({ publicSeats: 2 });
     await ft.commitInventory(inv.root, 2, 0, 0);
-    return { ft, organiser, fans: [a, b, c], stranger };
+    return { ft, organiser, fans: [a, b, c], stranger, inv };
   }
 
   async function registeredAndClosed() {
@@ -80,6 +80,30 @@ describe("FairTicketsCommitReveal (Quai Orchard randomness)", () => {
     expect(await ft.randomSeed()).to.equal(expected);
     await ft.runShuffle(10);
     expect(await ft.phase()).to.equal(4n); // Sale
+  });
+
+  it("positionOf is O(1) and matches the shuffled list; pages return the same data", async () => {
+    const { ft, fans, stranger, inv } = await loadFixture(registeredAndClosed);
+    expect(await ft.positionOf(fans[0].address)).to.equal(ethers.MaxUint256); // not drawn yet
+    await ft.requestDraw();
+    await mine(1);
+    await ft.revealSeed(SECRET);
+    await ft.runShuffle(1); // partial shuffle: only slot 0 is final
+    const firstSlot = await ft.entrantAt(0);
+    expect(await ft.positionOf(firstSlot)).to.equal(0n);
+    await ft.runShuffle(10);
+    const order = [...(await ft.getEntrants())];
+    for (const f of fans) expect(await ft.positionOf(f.address)).to.equal(BigInt(order.indexOf(f.address)));
+    expect(await ft.positionOf(stranger.address)).to.equal(ethers.MaxUint256);
+    expect([...(await ft.getEntrantsPage(1, 5))]).to.deep.equal(order.slice(1));
+    expect([...(await ft.getEntrantsPage(9, 5))]).to.deep.equal([]);
+    // winners claim; paged live tickets match the full list
+    await ft.revealSeats(...revealArgs(inv.tree, [0, 1]));
+    for (let p = 0; p < 2; p++) await ft.connect(fans.find((f) => f.address === order[p])).claimTicket(p, { value: PRICE });
+    const all = await ft.getLiveTickets();
+    const page = await ft.getLiveTicketsPage(0, 100);
+    expect(page.ids.map(String)).to.deep.equal(all.ids.map(String));
+    expect((await ft.getLiveTicketsPage(2, 1)).ids.map(String)).to.deep.equal(["2"]);
   });
 
   it("only the organiser reveals; anyone can force a fallback draw if they don't", async () => {
