@@ -40,7 +40,8 @@ async function main() {
   if (hre.network.name !== "cyprus1") throw new Error("Run with --network cyprus1 (and set RPC_URL, CYPRUS1_PK, CHAIN_ID in .env).");
 
   // ------------------------------------------------------------ preflight (read-only)
-  const provider = new quais.JsonRpcProvider(hre.network.config.url, undefined, { usePathing: true });
+  // RPC_URL already ends in /cyprus1, so pathing must be off (with it on, quais hangs on getNetwork).
+  const provider = new quais.JsonRpcProvider(hre.network.config.url, undefined, { usePathing: false });
   const wallet = new quais.Wallet(hre.network.config.accounts[0], provider);
   const net = await provider.getNetwork();
   const balance = await provider.getBalance(wallet.address);
@@ -49,7 +50,7 @@ async function main() {
   console.log("Deployer      :", wallet.address);
   console.log("Balance       :", quais.formatQuai(balance), "QUAI");
   if (net.chainId !== EXPECTED_CHAIN_ID) throw new Error(`STOP: chain ID ${net.chainId} is not Orchard Cyprus-1 (15000).`);
-  if (balance === 0n) throw new Error("STOP: deployer has no testnet QUAI. Use https://orchard.faucet.quai.network");
+  if (balance === 0n) throw new Error(`STOP: deployer has no testnet QUAI. Ask the organisers / Quai Discord to send Orchard QUAI to ${wallet.address} (orchard.faucet.quai.network is offline).`);
 
   console.log("\nPlan: deploy Verifier, AnonAadhaar (UIDAI test key), FairTicketsCommitReveal; then commitInventory, commitSeed, openRegistration.");
   console.log("Admin powers of the deployer (organiser): commit inventory/seed once, open registration, reveal the seed,");
