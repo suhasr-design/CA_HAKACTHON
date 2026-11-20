@@ -22,6 +22,45 @@ const send = (msg) => {
   else window.parent?.postMessage(text, "*");
 };
 
+// "Prove on the laptop": ask the laptop prover page for a proof bound to this wallet and poll for it.
+function LaptopProof() {
+  const [state, setState] = useState("idle"); // idle | waiting | done | error
+  const sent = useRef(false);
+  useEffect(() => {
+    if (state !== "waiting") return;
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/proof/${signal}`, { cache: "no-store" });
+        if (r.status !== 200 || sent.current) return;
+        sent.current = true;
+        send(await r.json());
+        setState("done");
+      } catch {}
+    }, 3000);
+    return () => clearInterval(t);
+  }, [state]);
+  const start = async () => {
+    try {
+      const r = await fetch("/api/proof-request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signal, seed }) });
+      setState(r.ok ? "waiting" : "error");
+    } catch { setState("error"); }
+  };
+  return (
+    <div style={S.help}>
+      <b>Phone too slow? Prove on the laptop</b>
+      <p style={{ margin: "6px 0" }}>The proving step needs ~600 MB of memory. A laptop does it in 2–5 minutes; the proof comes back here, locked to this wallet.</p>
+      {state === "idle" && <button style={{ ...S.btn, borderColor: "#8F86FF", color: "#8F86FF" }} onClick={start}>Prove on the laptop</button>}
+      {state === "waiting" && (
+        <p style={{ margin: "6px 0", color: "#F2EFFF" }}>
+          ⏳ Waiting… On the laptop open <b>{window.location.host}/prove.html</b>, pick this wallet ({signal.slice(0, 6)}…{signal.slice(-4)}) and upload the Aadhaar QR there.
+        </p>
+      )}
+      {state === "done" && <p style={{ margin: "6px 0", color: "#2BD4A4" }}>✓ Proof received from the laptop. Returning to the app…</p>}
+      {state === "error" && <p style={{ margin: "6px 0", color: "#FF6B8B" }}>Couldn't reach the laptop. <button style={S.btn} onClick={start}>Try again</button></p>}
+    </div>
+  );
+}
+
 function Bridge({ real }) {
   const [aa, startReq] = useAnonAadhaar();
   const [, latest] = useProver();
@@ -67,6 +106,7 @@ function Bridge({ real }) {
         </p>
         {p && !bound && <button style={S.btn} onClick={() => { sent.current = false; startReq({ type: "logout" }); }}>Clear and prove again</button>}
       </div>
+      <LaptopProof />
       {real ? (
         <div style={S.help}>
           <b>Where do I get my Secure QR?</b>
