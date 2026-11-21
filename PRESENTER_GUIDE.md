@@ -103,10 +103,23 @@ Show the phone to the judges, or mirror its screen. Tap **Verify with Anon Aadha
 
 Concerts and festivals · IPL / cricket matches (multiple gates) · temple darshan slots (one devotee, one slot) · Tatkal-style quotas · hospital OPD tokens · college fests and exam seats. Anywhere demand exceeds supply and “one person, one fair chance” must be verifiable.
 
-## New demo flow (real data)
+## Fan Pass: “prove you’re human once, then fair tickets for every event in two seconds”
+
+**Why:** a real Anon Aadhaar proof needs a 584 MB proving key: ~55 s even on a flagship phone with snarkjs, and it stalls in an app WebView. Every existing approach either sees your identity (OTP, eKYC, DigiLocker, DigiYatra) or is generic identity without fair allocation (Self, zkPassport, World ID).
+
+**How:**
+1. **Once:** the fan proves their Aadhaar at a **kiosk** (box office, partner desk, the organiser laptop: `/kiosk.html`) or on the phone. The proof is bound to a **Fan Pass ID** generated and kept in the phone’s secure storage. The pass is added to an on-chain **Semaphore** group (Ethereum Foundation’s anonymous-membership protocol). One Aadhaar = one Fan Pass.
+2. **Every event:** the phone proves “I hold a Fan Pass” with a **5.5 MB** proving file, in **seconds** (measured: ~1 s in Node, ~7 s in a browser including the download). The proof gives a code unique to that person **for that event only**: no double entry, and events can’t track fans across events.
+3. **Lost phone:** restore with the backup code, or re-enrol at a kiosk with a **newer** Aadhaar QR: the old phone’s pass is retired on-chain (old proofs stop working within 5 minutes).
+4. **Help desk:** a fresh Aadhaar proof finds *that person’s* pass, and the phone must prove it holds *that* pass and that it made *this* ticket’s entry. A tout’s buyer fails.
+
+**Measured / tested:** 42 contract tests (5 with real Semaphore proofs), service end-to-end test (`scripts/e2e-fanpass.js`, 11 checks), browser proof verified.
+
+## New demo flow (real booking)
 
 1. **Organiser → Create an event:** real name, venue, date, ₹ price, 100 seats (+ sponsor/holds declared). ~30 s.
-2. **Phone → Use my own wallet → Verify with Anon Aadhaar → Prove on the laptop** (`/prove.html`, upload the Secure QR). The sponsor pays gas only because the proof is valid; the phone registers.
+2. **Phone → Book a ticket → Get my Fan Pass → “at a kiosk”** → a 6-character code appears. **Laptop → Organiser → Open kiosk** → type the code → upload the Aadhaar Secure QR → “Fan Pass issued” (2–5 min the first time). The phone flips to “Fan Pass active” by itself.
+3. **Phone → Join the draw:** registered in seconds; the relayer paid the gas and added test ETH for the ticket.
 3. **Organiser → Add synthetic crowd (137)** → Close registration → Request draw → Deliver randomness → Run shuffle → Reveal seats → Synthetic winners pay.
 4. **Phone:** won a seat (pay) or waitlist #N with “drawn #k of 138”.
 5. **Gate (two tabs, Gate A and B):** download list → the phone types Gate A’s code → ENTER; the same ticket at Gate B → REJECT “already entered at Gate A”; “Relayed / old QR” → REJECT.
