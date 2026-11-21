@@ -14,6 +14,7 @@
 // 4. Create event (organiser, laptop only): redeploys a new event with the given details.
 //      POST /api/events {title, venue, startsAt, priceInr, priceEth, publicSeats, ...}
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { spawn } from "child_process";
 import { ethers } from "ethers";
@@ -76,7 +77,24 @@ const send = (res, code, obj) => {
 const isAddr = (s) => /^0x[0-9a-fA-F]{40}$/.test(s || "");
 const isUintList = (a, n) => Array.isArray(a) && a.length === n && a.every((x) => /^\d+$/.test(String(x)));
 const isProof = (p) => p && /^\d+$/.test(String(p.nullifier)) && /^\d+$/.test(String(p.timestamp)) && isUintList(p.revealArray, 4) && isUintList(p.groth16Proof, 8);
-const isLocal = (req) => ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
+// "Local" = this laptop, whether the page was opened as localhost or via its Wi-Fi address.
+const ownAddresses = () => new Set(["127.0.0.1", "::1", ...Object.values(os.networkInterfaces()).flat().map((i) => i.address)]);
+const isLocal = (req) => ownAddresses().has(String(req.socket.remoteAddress).replace(/^::ffff:/, ""));
+
+/** Runs scripts/deploy-local.js with the given event details. */
+const deployEvent = (ev) => new Promise((resolve, reject) => {
+  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+  const child = spawn(npx, ["hardhat", "run", "scripts/deploy-local.js", "--network", "localhost"], {
+    cwd: ROOT, env: { ...process.env, EVENT_JSON: JSON.stringify(ev) }, shell: process.platform === "win32",
+  });
+  let log = "";
+  child.stdout.on("data", (d) => { log += d; });
+  child.stderr.on("data", (d) => { log += d; });
+  child.on("close", (code) => (code === 0 ? resolve(log) : reject(new Error(log.trim().split("\n").slice(-3).join(" ") || `exit ${code}`))));
+});
+
+/** Forget every in-flight request of the previous run (Fan Passes themselves live on-chain and are kept). */
+const clearSession = () => { requests.clear(); proofs.clear(); scans.clear(); sponsored.clear(); passRequests.clear(); deskProofs.clear(); passFunded.clear(); };
 const loadDeployment = () => JSON.parse(fs.readFileSync(DEPLOYMENT, "utf8"));
 
 async function handle(req, res, url) {
@@ -258,17 +276,27 @@ async function handle(req, res, url) {
     const ev = await readJson(req);
     deploying = true;
     try {
-      const out = await new Promise((resolve, reject) => {
-        const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-        const child = spawn(npx, ["hardhat", "run", "scripts/deploy-local.js", "--network", "localhost"], {
-          cwd: ROOT, env: { ...process.env, EVENT_JSON: JSON.stringify(ev) }, shell: process.platform === "win32",
-        });
-        let log = "";
-        child.stdout.on("data", (d) => { log += d; });
-        child.stderr.on("data", (d) => { log += d; });
-        child.on("close", (code) => (code === 0 ? resolve(log) : reject(new Error(log.trim().split("\n").slice(-3).join(" ") || `exit ${code}`))));
-      });
+      const out = await deployEvent(ev);
+      clearSession();
       return send(res, 200, { ok: true, log: out.trim().split("\n").slice(0, 4) });
+    } catch (e) {
+      return send(res, 400, { error: String(e.message || e) });
+    } finally {
+      deploying = false;
+    }
+  }
+  // ---------------------------------------------------------------- 5. restart the demo (laptop only)
+  // Same event details, brand-new contract: registration open again, no entrants, tickets or gate scans.
+  if (url.pathname === "/api/reset" && req.method === "POST") {
+    if (!isLocal(req)) return send(res, 403, { error: "Restart the demo from the organiser laptop." });
+    if (deploying) return send(res, 409, { error: "Already restarting; wait a few seconds." });
+    const dep = loadDeployment();
+    const ev = { ...(dep.event || {}), crowd: (dep.crowd || []).length, registrationMinutes: 120 };
+    deploying = true;
+    try {
+      await deployEvent(ev);
+      clearSession();
+      return send(res, 200, { ok: true, event: ev.title });
     } catch (e) {
       return send(res, 400, { error: String(e.message || e) });
     } finally {

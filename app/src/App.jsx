@@ -91,6 +91,28 @@ export default function App() {
 
   const props = { state, account, setAccount, run, refresh, log, go: setTab };
 
+  // Refresh = start the demo again from the beginning: same event details, brand-new contract
+  // (registration open, no entrants/tickets), gate scans and pending requests cleared. Phones switch to
+  // the new event automatically. Fan Passes stay valid, so fans don't need to re-prove Aadhaar.
+  const [restarting, setRestarting] = useState(false);
+  const restart = async () => {
+    if (!confirm("Start the demo again from the beginning?\n\nA fresh copy of this event is created with registration open. Registrations, the draw, tickets and gate scans are cleared. Fan Passes are kept.")) return;
+    setRestarting(true);
+    try {
+      const r = await fetch("/api/reset", { method: "POST" });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      try {
+        for (const k of Object.keys(localStorage)) if (/^ft-(cache|scanned|pending)/.test(k)) localStorage.removeItem(k);
+        sessionStorage.removeItem("ft-gate");
+      } catch {}
+      window.location.reload();
+    } catch (e) {
+      setRestarting(false);
+      toast({ ok: false, title: "Couldn’t restart the demo", body: e.message });
+    }
+  };
+
   return (
     <ExplainCtx.Provider value={explain}>
       <div className="shell">
@@ -115,8 +137,9 @@ export default function App() {
               <span className="switch-ui" /> Presenter notes
             </label>
             <span className="mobile-pill" title="Fans use the Fair Tickets Android app">📱 Fans: Android app</span>
-            <button className="btn primary sm refresh-btn" title="Reload this page with the latest data from the blockchain (Ctrl+R)"
-              onClick={() => window.location.reload()}>↻ Refresh</button>
+            <button className="btn primary sm refresh-btn" disabled={restarting}
+              title="Start the demo again: a fresh copy of this event with registration open. Fan Passes are kept."
+              onClick={restart}>{restarting ? "Restarting…" : "↻ Refresh"}</button>
           </div>
         </header>
 
@@ -128,6 +151,15 @@ export default function App() {
           </div>
         )}
 
+        {restarting && (
+          <div className="restart-overlay">
+            <div className="restart-card">
+              <div className="restart-spin">↻</div>
+              <h2>Starting the demo again…</h2>
+              <p className="muted">Creating a fresh copy of the event with registration open (about 30 seconds). Phones switch over automatically; Fan Passes are kept.</p>
+            </div>
+          </div>
+        )}
         {error && <div className="error-banner">{error}</div>}
 
         <main className="main">
