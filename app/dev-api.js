@@ -15,6 +15,7 @@
 //      POST /api/events {title, venue, startsAt, priceInr, priceEth, publicSeats, ...}
 import fs from "fs";
 import os from "os";
+import crypto from "crypto";
 import path from "path";
 import { spawn } from "child_process";
 import { ethers } from "ethers";
@@ -92,6 +93,33 @@ const deployEvent = (ev) => new Promise((resolve, reject) => {
   child.stderr.on("data", (d) => { log += d; });
   child.on("close", (code) => (code === 0 ? resolve(log) : reject(new Error(log.trim().split("\n").slice(-3).join(" ") || `exit ${code}`))));
 });
+
+// Laptop prover jobs: the kiosk / help-desk browser sends the decoded QR number to THIS laptop's prover
+// (a separate Node process, single-threaded so it fits in memory). The QR stays on this machine, is
+// passed over stdin, and is dropped as soon as the proof is made. One proof at a time.
+const jobs = new Map(); // id -> { status, stage, startedAt, result, error }
+let proving = false;
+const queue = [];
+function startNextJob() {
+  if (proving || !queue.length) return;
+  const { id, payload } = queue.shift();
+  const job = jobs.get(id);
+  proving = true;
+  job.status = "running";
+  job.startedAt = Date.now();
+  const child = spawn(process.execPath, ["--max-old-space-size=3072", path.join(ROOT, "scripts", "prove-aadhaar.cjs")], { cwd: ROOT });
+  let out = "";
+  child.stdout.on("data", (d) => { out += d; });
+  child.stderr.on("data", (d) => { const m = String(d).match(/STAGE (\w+)/g); if (m) job.stage = m[m.length - 1].slice(6); });
+  child.on("close", () => {
+    try { const r = JSON.parse(out); if (r.ok) { job.status = "done"; job.result = r.proof; } else { job.status = "error"; job.error = r.error; } }
+    catch { job.status = "error"; job.error = "The prover stopped unexpectedly (low memory?). Close other apps and try again."; }
+    job.seconds = Math.round((Date.now() - job.startedAt) / 1000);
+    proving = false;
+    startNextJob();
+  });
+  child.stdin.end(JSON.stringify(payload));
+}
 
 /** Forget every in-flight request of the previous run (Fan Passes themselves live on-chain and are kept). */
 const clearSession = () => { requests.clear(); proofs.clear(); scans.clear(); sponsored.clear(); passRequests.clear(); deskProofs.clear(); passFunded.clear(); };
@@ -285,6 +313,30 @@ async function handle(req, res, url) {
       deploying = false;
     }
   }
+  // ---------------------------------------------------------------- 4b. laptop prover (kiosk / help desk)
+  if (url.pathname === "/api/laptop-prove" && req.method === "POST") {
+    if (!isLocal(req)) return send(res, 403, { error: "The laptop prover only accepts QRs from this laptop’s own kiosk page." });
+    const { qrData, signal, seed } = await readJson(req);
+    if (!/^\d{100,}$/.test(String(qrData || "").trim())) return send(res, 400, { error: "That isn’t an Aadhaar Secure QR (expected a long number)." });
+    if (!isField(signal) && !isAddr(signal)) return send(res, 400, { error: "bad signal" });
+    if (!isField(seed)) return send(res, 400, { error: "bad seed" });
+    const id = crypto.randomUUID();
+    jobs.set(id, { status: "queued", stage: "queued", createdAt: now });
+    for (const [k, j] of jobs) if (now - j.createdAt > TTL) jobs.delete(k);
+    const mode = loadDeployment().aadhaarMode === "test" ? "test" : "real";
+    queue.push({ id, payload: { qrData: String(qrData).trim(), signal: isAddr(signal) ? BigInt(signal).toString() : String(signal), seed: String(seed), mode } });
+    startNextJob();
+    return send(res, 200, { id, ahead: queue.length - 1 + (proving ? 1 : 0) });
+  }
+  const jm = url.pathname.match(/^\/api\/laptop-prove\/([0-9a-f-]{36})$/);
+  if (jm && req.method === "GET") {
+    const j = jobs.get(jm[1]);
+    if (!j) return send(res, 404, { error: "unknown job" });
+    const out = { status: j.status, stage: j.stage, elapsed: j.startedAt ? Math.round((Date.now() - j.startedAt) / 1000) : 0, seconds: j.seconds, error: j.error };
+    if (j.status === "done") { out.proof = j.result; jobs.delete(jm[1]); } // hand over once, then forget
+    return send(res, 200, out);
+  }
+
   // ---------------------------------------------------------------- 5. restart the demo (laptop only)
   // Same event details, brand-new contract: registration open again, no entrants, tickets or gate scans.
   if (url.pathname === "/api/reset" && req.method === "POST") {

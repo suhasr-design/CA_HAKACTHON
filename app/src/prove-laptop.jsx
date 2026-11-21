@@ -7,10 +7,40 @@ import { createRoot } from "react-dom/client";
 import { AnonAadhaarProvider, LogInWithAnonAadhaar, useAnonAadhaar, useProver } from "@anon-aadhaar/react";
 import { hash as aaHash, packGroth16Proof } from "@anon-aadhaar/core";
 import { nameOf } from "./chain";
+import LaptopProver from "./laptopProver.jsx";
 
 const short = (a) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
+// Default: this laptop's prover (~1.5 min, reliable on a 6 GB laptop). Falls back to the in-browser
+// prover only if this page is opened on another computer.
 function Prover({ req, onDone }) {
+  const [browser, setBrowser] = useState(false);
+  const [status, setStatus] = useState("");
+  if (browser) return <BrowserProver req={req} onDone={onDone} />;
+  const relay = async (proof) => {
+    try {
+      const r = await fetch(`/api/proof/${req.signal}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "proof", ...proof }) });
+      if (!r.ok) throw new Error(`relay said ${r.status}`);
+      setStatus("✓ Proof sent. It’s used automatically (phone registration or help-desk check).");
+      setTimeout(onDone, 2500);
+    } catch (e) {
+      setStatus(`Couldn't send the proof: ${e.message}`);
+    }
+  };
+  return (
+    <div style={S.box}>
+      <div style={S.label}>Proving for</div>
+      <div style={S.big}>{nameOf(req.signal) || short(req.signal)}</div>
+      <div style={S.small}>wallet {short(req.signal)}</div>
+      <div style={{ margin: "16px 0" }}>
+        <LaptopProver signal={req.signal} seed={req.seed} onProof={relay} onUnavailable={() => setBrowser(true)} label="Upload the fan’s Aadhaar Secure QR" />
+      </div>
+      {status && <p style={S.small}>{status}</p>}
+    </div>
+  );
+}
+
+function BrowserProver({ req, onDone }) {
   const [aa, startReq] = useAnonAadhaar();
   const [, latest] = useProver();
   const sent = useRef(false);

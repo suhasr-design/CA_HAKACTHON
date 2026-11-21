@@ -19,3 +19,6 @@ mobile/dist/
 # Semaphore proving files (download with: node scripts/fetch-semaphore-artifacts.js)
 app/public/semaphore/
 deployments/local-fanpass.json
+
+# Anon Aadhaar proving files for the laptop prover (download: node scripts/fetch-anon-aadhaar-artifacts.js)
+.zk/

@@ -8,6 +8,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AnonAadhaarProvider, LogInWithAnonAadhaar, useAnonAadhaar, useProver } from "@anon-aadhaar/react";
 import { hash as aaHash, packGroth16Proof } from "@anon-aadhaar/core";
+import LaptopProver from "./laptopProver.jsx";
 
 const KIOSK = new URLSearchParams(window.location.search).get("name") || "Fan Pass kiosk";
 const api = async (path, body) => {
@@ -17,7 +18,34 @@ const api = async (path, body) => {
   return j;
 };
 
+// Default: prove on this laptop's prover (~1.5 min, reliable). A kiosk running on another computer
+// can't use it and falls back to the in-browser prover (BrowserProve below).
 function Prove({ req, onIssued, onCancel }) {
+  const [browser, setBrowser] = useState(false);
+  const [msg, setMsg] = useState("");
+  if (browser) return <BrowserProve req={req} onIssued={onIssued} onCancel={onCancel} />;
+  const enroll = async (proof) => {
+    setMsg("Issuing the Fan Pass on the blockchain…");
+    try {
+      onIssued(await api("/api/fanpass/enroll", { commitment: req.commitment, proof }));
+    } catch (e) {
+      setMsg(`✕ ${e.message}`);
+    }
+  };
+  return (
+    <div style={S.card}>
+      <div style={S.step}>STEP 2 OF 3</div>
+      <h2 style={S.h2}>Upload the fan’s Aadhaar Secure QR</h2>
+      <div style={{ margin: "18px 0" }}>
+        <LaptopProver signal={req.commitment} seed={req.seed} onProof={enroll} onUnavailable={() => setBrowser(true)} />
+      </div>
+      {msg && <p style={S.p}>{msg}</p>}
+      <button style={S.ghost} onClick={onCancel}>Cancel and clear</button>
+    </div>
+  );
+}
+
+function BrowserProve({ req, onIssued, onCancel }) {
   const [aa, startReq] = useAnonAadhaar();
   const [, latest] = useProver();
   const sent = useRef(false);
