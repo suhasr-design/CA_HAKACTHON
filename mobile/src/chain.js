@@ -15,6 +15,40 @@ export async function loadOrCreateOwnKey() {
   return k;
 }
 
+// ---------------------------------------------------------------- Fan Pass
+// The Fan Pass secret (Semaphore identity) lives in secure storage. Only its commitment and
+// zero-knowledge proofs ever leave the phone. The fan can back it up (a 64-character code) and restore
+// it on a new phone.
+const PASS_SECRET = "fairtickets.passSecret.v1";
+const PASS_COMMITMENT = "fairtickets.passCommitment.v1";
+const secureOpts = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
+export async function loadOrCreatePassSecret() {
+  let s = await SecureStore.getItemAsync(PASS_SECRET);
+  if (!s) {
+    s = ethers.hexlify(ethers.randomBytes(32)).slice(2);
+    await SecureStore.setItemAsync(PASS_SECRET, s, secureOpts);
+  }
+  return s;
+}
+export async function restorePassSecret(code) {
+  const s = String(code).trim().toLowerCase().replace(/^0x/, "");
+  if (!/^[0-9a-f]{64}$/.test(s)) throw new Error("A Fan Pass backup code is 64 characters (0-9, a-f).");
+  await SecureStore.setItemAsync(PASS_SECRET, s, secureOpts);
+  await SecureStore.deleteItemAsync(PASS_COMMITMENT);
+  return s;
+}
+export const savePassCommitment = (c) => SecureStore.setItemAsync(PASS_COMMITMENT, String(c), secureOpts);
+export const loadPassCommitment = () => SecureStore.getItemAsync(PASS_COMMITMENT);
+export async function passStatus(host, commitment) {
+  const r = await fetch(`http://${host}:5173/api/fanpass/status?commitment=${commitment}`);
+  return r.ok ? r.json() : { member: false };
+}
+/** A made-up Fan Pass proof (what a bot would send). */
+export function fakePassProof(wallet, scope) {
+  const r = () => BigInt(ethers.hexlify(ethers.randomBytes(31)));
+  return { merkleTreeDepth: 20n, merkleTreeRoot: r(), nullifier: r(), message: BigInt(wallet), scope: BigInt(scope), points: Array.from({ length: 8 }, r) };
+}
+
 /** Ask the laptop's sponsor for gas. It only pays out for a valid Aadhaar proof, once per person. */
 export async function requestSponsor(host, address, proof) {
   const res = await fetch(`http://${host}:5173/api/sponsor`, {
@@ -68,7 +102,7 @@ export function makeChain(host, dep, ownKey) {
   const own = ownKey ? new ethers.Wallet(ownKey, provider) : null;
   const signerOf = (who) => (who === "me" ? own : wallets[who]);
   const contract = (signer = provider) => new ethers.Contract(dep.fairTickets, dep.abi, signer);
-  return { host, dep, provider, wallets, own, signerOf, contract, aadhaarUrl: `http://${host}:5173/aadhaar.html` };
+  return { host, dep, provider, wallets, own, signerOf, contract, aadhaarUrl: `http://${host}:5173/aadhaar.html`, passUrl: `http://${host}:5173/fanpass.html` };
 }
 
 /** Synthetic demo proof (all-zero): accepted only for synthetic accounts listed at deployment. */

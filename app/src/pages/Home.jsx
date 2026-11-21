@@ -39,7 +39,7 @@ const USES = [
 
 export default function Home({ state, go }) {
   const live = state.tickets.filter((t) => t.status === 1).length;
-  const zk = Object.values(state.regKinds).filter((k) => k === "zk").length;
+  const zk = Object.values(state.regKinds).filter((k) => k === "zk" || k === "pass").length;
   const waitlist = state.phase === 4 ? Math.max(0, state.entrants.length - state.nextWaitlistIndex) : 0;
   const closes = state.regCloses - state.chainTime;
   const title = EVENT.title || state.eventName.split("·")[0];

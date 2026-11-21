@@ -6,6 +6,8 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {IAnonAadhaar} from "./interfaces/IAnonAadhaar.sol";
+import {IFanPass} from "./interfaces/IFanPass.sol";
+import {ISemaphoreMin} from "./interfaces/ISemaphoreMin.sol";
 
 /// @title FairTicketsBase: all event rules except the source of randomness.
 /// @notice Concrete contracts plug in the randomness:
@@ -65,6 +67,8 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
     mapping(address => bool) public isRegistered;
     uint32 public assistedCap;     // public quota for the in-person ID desk
     uint32 public assistedCount;
+    IFanPass public fanPass;       // Fan Pass registry (prove once, join events in seconds)
+    bool public passOnly;
 
     // Lottery
     uint256 public randomSeed;
@@ -199,6 +203,9 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
         require(block.timestamp < registrationClosesAt, "Registration closed");
         require(!nullifierUsed[nullifier], "This person is already registered");
         require(!isRegistered[msg.sender], "Wallet already registered");
+        if (passOnly) {
+            for (uint256 i = 0; i < 8; i++) require(groth16Proof[i] == 0, "Use your Fan Pass");
+        }
         uint256 signal = uint256(uint160(msg.sender));
         // The Groth16 verifier can revert on malformed points; treat any failure as an invalid proof.
         bool valid;
@@ -231,6 +238,32 @@ abstract contract FairTicketsBase is ERC721, Ownable, ReentrancyGuard {
         assistedCount++;
         _addEntrant(fan, n);
         emit AssistedRegistered(fan, docHash);
+    }
+
+    /// @notice Organiser links the Fan Pass registry before registration opens. With `passOnly`, real
+    /// fans can ONLY enter with a Fan Pass (direct Aadhaar entry is closed), so one person can't use both
+    /// routes for two entries. All-zero proofs still reach the verifier: only the labelled demo router
+    /// accepts those, for its listed synthetic accounts.
+    function setFanPass(address registry, bool _passOnly) external onlyOwner inPhase(Phase.Setup) {
+        fanPass = IFanPass(registry);
+        passOnly = _passOnly;
+    }
+
+    /// @notice Event scope for Fan Pass proofs: unique per event, below the SNARK field.
+    function passScope() public view returns (uint256) {
+        return uint256(keccak256(abi.encode(address(this), nullifierSeed))) >> 8;
+    }
+
+    /// @notice Register `fan` with a Fan Pass proof (seconds on a phone). The proof's message must be the
+    /// fan's wallet, so anyone (e.g. a gas relayer) may submit it without being able to redirect the entry.
+    function registerWithPass(address fan, ISemaphoreMin.SemaphoreProof calldata proof) external inPhase(Phase.Registration) {
+        require(block.timestamp < registrationClosesAt, "Registration closed");
+        require(address(fanPass) != address(0), "No Fan Pass registry");
+        require(!isRegistered[fan], "Wallet already registered");
+        require(fanPass.verify(passScope(), uint256(uint160(fan)), proof), "Invalid Fan Pass proof");
+        uint256 n = uint256(keccak256(abi.encode("fanpass", proof.nullifier)));
+        require(!nullifierUsed[n], "This person is already registered");
+        _addEntrant(fan, n);
     }
 
     function _addEntrant(address fan, uint256 nullifier) private {

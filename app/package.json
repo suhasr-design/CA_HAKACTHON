@@ -13,6 +13,7 @@
     "@anon-aadhaar/core": "^2.4.3",
     "@anon-aadhaar/react": "^2.4.3",
     "@openzeppelin/merkle-tree": "1.0.8",
+    "@semaphore-protocol/core": "^4.14.5",
     "canvas-confetti": "^1.9.3",
     "ethers": "6.13.4",
     "html5-qrcode": "2.3.8",

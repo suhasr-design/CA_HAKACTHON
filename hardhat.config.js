@@ -17,10 +17,23 @@ const compiler = {
   },
 };
 
+// Semaphore v4 (Fan Pass) requires Solidity >=0.8.23: only its import tree is compiled with 0.8.23,
+// with the same optimizer and the same "london" EVM target (no newer opcodes).
+const semaphoreCompiler = { ...compiler, version: "0.8.23" };
+const SEMAPHORE_FILES = [
+  "contracts/fanpass/SemaphoreDeps.sol",
+  ...["Semaphore.sol", "base/Constants.sol", "base/SemaphoreGroups.sol", "base/SemaphoreVerifier.sol", "base/SemaphoreVerifierKeyPts.sol",
+    "interfaces/ISemaphore.sol", "interfaces/ISemaphoreGroups.sol", "interfaces/ISemaphoreVerifier.sol"].map((f) => `@semaphore-protocol/contracts/${f}`),
+  "@zk-kit/lean-imt.sol/InternalLeanIMT.sol", "@zk-kit/lean-imt.sol/Constants.sol", "poseidon-solidity/PoseidonT3.sol",
+];
+
 module.exports = {
   // Tests and the local demo use the in-process Hardhat network; Orchard is opt-in with --network cyprus1.
   defaultNetwork: "hardhat",
-  solidity: { compilers: [compiler] },
+  solidity: {
+    compilers: [compiler],
+    overrides: Object.fromEntries(SEMAPHORE_FILES.map((f) => [f, semaphoreCompiler])),
+  },
   networks: {
     hardhat: { chainId: 31337 },
     localhost: { url: "http://127.0.0.1:8545", chainId: 31337 },

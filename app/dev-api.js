@@ -17,6 +17,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 import { ethers } from "ethers";
+import { Group, verifyProof as verifySemaphoreProof } from "@semaphore-protocol/core";
 
 const ROOT = path.resolve(__dirname, "..");
 const DEPLOYMENT = path.join(ROOT, "app", "src", "deployment.json");
@@ -27,8 +28,38 @@ const requests = new Map(); // wallet -> { signal, seed, at }
 const proofs = new Map();   // wallet -> proof message
 const scans = new Map();    // contract -> Map(ticket -> { gate, at })
 const sponsored = new Map(); // contract -> Set(nullifier | address)
+const passRequests = new Map(); // pairing code -> { commitment, at }   (kiosk enrolment)
+const deskProofs = new Map();   // wallet -> single-member Semaphore proof (help-desk ownership check)
+const passFunded = new Set();   // event:semaphoreNullifier -> already given test ETH
 let deploying = false;
 const TTL = 30 * 60 * 1000;
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const newCode = () => Array.from({ length: 6 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join("");
+const isField = (s) => /^\d{1,78}$/.test(String(s));
+
+const chainOf = (dep) => {
+  const provider = new ethers.JsonRpcProvider(dep.rpcUrl, dep.chainId, { staticNetwork: true });
+  const relayer = new ethers.Wallet(LOCAL_ORGANISER_KEY, provider);
+  return { provider, relayer, fanPass: new ethers.Contract(dep.fanPass.fanPass, dep.fanPass.abi, relayer), ft: new ethers.Contract(dep.fairTickets, dep.abi.fairTickets, relayer) };
+};
+
+/** Fan Pass tree as phones must rebuild it: commitments in insertion order; replaced ones are removed. */
+async function passTree(fanPass) {
+  const [enrolled, replaced] = await Promise.all([
+    fanPass.queryFilter(fanPass.filters.Enrolled(), 0, "latest"),
+    fanPass.queryFilter(fanPass.filters.Replaced(), 0, "latest"),
+  ]);
+  const leaves = enrolled.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index).map((e) => e.args.commitment.toString());
+  const removedSet = new Set(replaced.map((e) => e.args.oldCommitment.toString()));
+  const removed = leaves.map((c, i) => (removedSet.has(c) ? i : -1)).filter((i) => i >= 0);
+  return { leaves, removed };
+}
+const buildGroup = ({ leaves, removed }) => {
+  const g = new Group(leaves);
+  for (const i of removed) g.removeMember(i);
+  return g;
+};
+const reason = (e) => String(e?.reason || e?.shortMessage || e?.message || e).replace(/^execution reverted: /, "").replace(/.*reverted with reason string '([^']*)'.*/s, "$1").slice(0, 160);
 
 const readJson = (req) =>
   new Promise((resolve, reject) => {
@@ -74,6 +105,103 @@ async function handle(req, res, url) {
       requests.delete(key);
       return send(res, 200, { ok: true });
     }
+  }
+
+  // ---------------------------------------------------------------- 1b. Fan Pass
+  // Phone asks for a kiosk enrolment: gets a short pairing code to read out at the kiosk.
+  if (req.method === "POST" && url.pathname === "/api/fanpass/request") {
+    const { commitment } = await readJson(req);
+    if (!isField(commitment)) return send(res, 400, { error: "bad commitment" });
+    for (const [k, v] of passRequests) if (now - v.at > TTL || v.commitment === String(commitment)) passRequests.delete(k);
+    let code = newCode();
+    while (passRequests.has(code)) code = newCode();
+    passRequests.set(code, { commitment: String(commitment), at: now });
+    return send(res, 200, { code });
+  }
+  const pr = url.pathname.match(/^\/api\/fanpass\/request\/([A-Z0-9]{6})$/);
+  if (pr && req.method === "GET") {
+    const r = passRequests.get(pr[1].toUpperCase());
+    if (!r) return send(res, 404, { error: "Unknown or expired code. Ask the fan to tap “Get my Fan Pass at a kiosk” again." });
+    const dep = loadDeployment();
+    return send(res, 200, { commitment: r.commitment, seed: dep.fanPass.seed });
+  }
+  // Kiosk (or phone) submits the Anon Aadhaar proof; the relayer pays the gas.
+  if (req.method === "POST" && url.pathname === "/api/fanpass/enroll") {
+    const { commitment, proof } = await readJson(req);
+    if (!isField(commitment) || !isProof(proof)) return send(res, 400, { error: "bad enrolment" });
+    const dep = loadDeployment();
+    const { fanPass } = chainOf(dep);
+    // Replacing a lost pass? Removing the old leaf needs its Merkle siblings.
+    let siblings = [];
+    const old = (await fanPass.passOfAadhaar(BigInt(proof.nullifier))).toString();
+    if (old !== "0") {
+      const tree = await passTree(fanPass);
+      const g = buildGroup(tree);
+      siblings = g.generateMerkleProof(tree.leaves.indexOf(old)).siblings.map(String);
+    }
+    const args = [BigInt(commitment), BigInt(proof.nullifier), BigInt(proof.timestamp), proof.revealArray.map(BigInt), proof.groth16Proof.map(BigInt), siblings.map(BigInt)];
+    try {
+      await fanPass.enroll.staticCall(...args);
+    } catch (e) {
+      return send(res, 400, { error: reason(e) });
+    }
+    const tx = await fanPass.enroll(...args);
+    await tx.wait();
+    for (const [k, v] of passRequests) if (v.commitment === String(commitment)) passRequests.delete(k);
+    return send(res, 200, { ok: true, replaced: old !== "0", tx: tx.hash, members: Number(await fanPass.members()) });
+  }
+  if (req.method === "GET" && url.pathname === "/api/fanpass/status") {
+    const c = url.searchParams.get("commitment");
+    if (!isField(c)) return send(res, 400, { error: "bad commitment" });
+    const { fanPass } = chainOf(loadDeployment());
+    return send(res, 200, { member: await fanPass.isMember(BigInt(c)), members: Number(await fanPass.members()) });
+  }
+  if (req.method === "GET" && url.pathname === "/api/fanpass/tree") {
+    const { fanPass } = chainOf(loadDeployment());
+    return send(res, 200, await passTree(fanPass));
+  }
+  // Phone registers for the event with a Fan Pass proof; the relayer pays the gas and, once per person,
+  // tops the wallet up with test ETH for the ticket (stand-in for a UPI payment).
+  if (req.method === "POST" && url.pathname === "/api/pass-register") {
+    const { fan, proof } = await readJson(req);
+    if (!isAddr(fan) || !proof || !isUintList(proof.points, 8) || !isField(proof.nullifier) || !isField(proof.merkleTreeRoot)) return send(res, 400, { error: "bad request" });
+    const dep = loadDeployment();
+    const { ft, provider, relayer } = chainOf(dep);
+    const p = { merkleTreeDepth: BigInt(proof.merkleTreeDepth), merkleTreeRoot: BigInt(proof.merkleTreeRoot), nullifier: BigInt(proof.nullifier), message: BigInt(proof.message), scope: BigInt(proof.scope), points: proof.points.map(BigInt) };
+    try {
+      await ft.registerWithPass.staticCall(fan, p);
+    } catch (e) {
+      return send(res, 400, { error: reason(e) });
+    }
+    const tx = await ft.registerWithPass(fan, p);
+    await tx.wait();
+    const key = `${dep.fairTickets}:${proof.nullifier}`;
+    let funded = null;
+    const price = await ft.facePrice();
+    if (!passFunded.has(key) && (await provider.getBalance(fan)) < price + ethers.parseEther("0.01")) {
+      passFunded.add(key);
+      const amount = price + ethers.parseEther("0.02");
+      await (await relayer.sendTransaction({ to: fan, value: amount })).wait();
+      funded = ethers.formatEther(amount);
+    }
+    return send(res, 200, { ok: true, tx: tx.hash, funded });
+  }
+  // Help desk ownership check: the phone proves its Fan Pass identity in a ONE-member group {commitment of
+  // the person who just re-proved Aadhaar at the desk}, for this event. Checked off-chain by the desk.
+  const dp = url.pathname.match(/^\/api\/desk-proof\/(0x[0-9a-fA-F]{40})$/);
+  if (dp) {
+    const key = dp[1].toLowerCase();
+    if (req.method === "POST") { deskProofs.set(key, await readJson(req)); return send(res, 200, { ok: true }); }
+    if (req.method === "GET") return deskProofs.has(key) ? send(res, 200, deskProofs.get(key)) : send(res, 404, { pending: true });
+    if (req.method === "DELETE") { deskProofs.delete(key); return send(res, 200, { ok: true }); }
+  }
+  if (req.method === "POST" && url.pathname === "/api/desk-verify") {
+    // Verifies a desk proof off-chain (the browser can't load node snarkjs as easily).
+    const { proof, commitment } = await readJson(req);
+    if (!proof || !isField(commitment)) return send(res, 400, { error: "bad request" });
+    const g = new Group([BigInt(commitment)]);
+    const ok = String(proof.merkleTreeRoot) === g.root.toString() && (await verifySemaphoreProof(proof).catch(() => false));
+    return send(res, 200, { ok });
   }
 
   // ---------------------------------------------------------------- 2. gate sync

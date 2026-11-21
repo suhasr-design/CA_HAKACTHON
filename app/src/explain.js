@@ -9,6 +9,10 @@ export const EXPLAIN = {
     shows: "The organiser enters the real event: name, venue, date, ₹ price and seat counts. A new contract is deployed with that seat list locked.",
     say: "Seat counts, sponsor seats and artist holds are declared up front and locked on-chain. Nothing can be hidden for touts later.",
   },
+  "org-fanpass": {
+    shows: "The Fan Pass registry: fans who proved their Aadhaar once. Each event only sees an anonymous, event-specific code from a ~5 MB proof the phone makes in seconds, instead of a 584 MB Aadhaar proof every time.",
+    say: "Prove you’re human once, then fair tickets for every event in two seconds. Kiosks at box offices handle the heavy one-time step, the way SIM or DigiYatra enrolment works, but only a proof leaves the counter.",
+  },
   "org-assisted": {
     shows: "In-person ID desk for fans without Aadhaar (foreign visitors, minors). Staff check a passport; only a hash goes on-chain. The quota is fixed before the sale and counted publicly.",
     say: "This closes the gap for people Aadhaar doesn’t cover, without opening a back door: the quota is public and the same document can’t register twice.",

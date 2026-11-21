@@ -275,7 +275,7 @@ export default function Gate({ state }) {
           <button className="btn sm" disabled={!cache || !paste} onClick={() => scan(paste.trim(), "Pasted QR")}>Verify pasted QR</button>
         </Card>
 
-        <HelpDesk cache={cache} online={online} onAdmit={async (ticket, who) => {
+        <HelpDesk cache={cache} online={online} regKinds={state.regKinds} onAdmit={async (ticket, who) => {
           const a = await admit(ticket);
           record(a.ok ? { ok: true, ticket, reason: `Identity verified at the help desk: admitted`, holder: who }
             : { ok: false, ticket, reason: `Already entered at ${a.already.gate}` }, "Help desk");
@@ -302,28 +302,46 @@ export default function Gate({ state }) {
 // Dead or lost phone, or a random spot-check against phone/wallet selling: the fan re-proves with
 // Aadhaar (laptop prover). The fresh proof must be valid for the ticket holder's wallet AND give the
 // same nullifier as the registration, i.e. it's the same person who registered.
-function HelpDesk({ cache, online, onAdmit }) {
+function HelpDesk({ cache, online, regKinds, onAdmit }) {
   const [ticket, setTicket] = useState("");
   const [stage, setStage] = useState("idle"); // idle | waiting | checking | done
   const [result, setResult] = useState(null);
+  const [got, setGot] = useState({ aadhaar: false, phone: false });
   const entry = cache?.list?.[Number(ticket)];
+  const isPass = !!(entry && regKinds?.[entry.holder] === "pass" && deployment.fanPass);
+  // Fan Pass holders re-prove Aadhaar for the Fan Pass registry; direct entrants for this event.
+  const seed = isPass ? deployment.fanPass.seed : deployment.nullifierSeed;
 
   useEffect(() => {
     if (stage !== "waiting" || !entry) return;
     const t = setInterval(async () => {
-      const r = await fetch(`/api/proof/${entry.holder}`, { cache: "no-store" }).catch(() => null);
-      if (!r || r.status !== 200) return;
-      const p = await r.json();
+      const ra = await fetch(`/api/proof/${entry.holder}`, { cache: "no-store" }).catch(() => null);
+      const rp = isPass ? await fetch(`/api/desk-proof/${entry.holder}`, { cache: "no-store" }).catch(() => null) : null;
+      const haveA = ra?.status === 200;
+      const haveP = !isPass || rp?.status === 200;
+      setGot({ aadhaar: haveA, phone: isPass && haveP });
+      if (!haveA || !haveP) return;
+      const p = await ra.json();
+      const desk = isPass ? await rp.json() : null;
       setStage("checking");
       try {
         const router = new ethers.Contract(deployment.aadhaarRouter, deployment.abi.router, provider);
-        const valid = await router.verifyAnonAadhaarProof(
-          BigInt(deployment.nullifierSeed), BigInt(p.nullifier), BigInt(p.timestamp), BigInt(entry.holder),
-          p.revealArray.map(BigInt), p.groth16Proof.map(BigInt));
+        const valid = await router.verifyAnonAadhaarProof(BigInt(seed), BigInt(p.nullifier), BigInt(p.timestamp), BigInt(entry.holder), p.revealArray.map(BigInt), p.groth16Proof.map(BigInt));
         const ft = fairTickets();
         const regs = await ft.queryFilter(ft.filters.Registered(entry.holder), 0, "latest");
         const registered = regs.length ? regs[regs.length - 1].args.nullifier : null;
-        const same = registered !== null && registered === BigInt(p.nullifier);
+        let same = false;
+        if (!isPass) {
+          same = registered !== null && registered === BigInt(p.nullifier);
+        } else {
+          // 1) The person at the desk -> their current Fan Pass. 2) The phone holds THAT pass (one-member
+          // group proof). 3) That pass made this ticket's entry (same per-event nullifier).
+          const fp = new ethers.Contract(deployment.fanPass.fanPass, deployment.fanPass.abi, provider);
+          const commitment = (await fp.passOfAadhaar(BigInt(p.nullifier))).toString();
+          const vr = commitment === "0" ? { ok: false } : await (await fetch("/api/desk-verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ proof: desk, commitment }) })).json();
+          const entryN = BigInt(ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["string", "uint256"], ["fanpass", BigInt(desk.nullifier)])));
+          same = vr.ok && BigInt(desk.message) === BigInt(entry.holder) && String(desk.scope) === String(deployment.fanPass.passScope) && registered === entryN;
+        }
         setResult({ valid, same });
       } catch (e) {
         setResult({ error: errorText(e) });
@@ -331,11 +349,13 @@ function HelpDesk({ cache, online, onAdmit }) {
       setStage("done");
     }, 3000);
     return () => clearInterval(t);
-  }, [stage, entry]);
+  }, [stage, entry, isPass, seed]);
 
   const request = async () => {
     setResult(null);
-    const r = await fetch("/api/proof-request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signal: entry.holder, seed: deployment.nullifierSeed }) }).catch(() => null);
+    setGot({ aadhaar: false, phone: false });
+    if (isPass) await fetch(`/api/desk-proof/${entry.holder}`, { method: "DELETE" }).catch(() => {});
+    const r = await fetch("/api/proof-request", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ signal: entry.holder, seed }) }).catch(() => null);
     setStage(r?.ok ? "waiting" : "idle");
   };
 
@@ -350,7 +370,10 @@ function HelpDesk({ cache, online, onAdmit }) {
         <button className="btn primary" disabled={!online} onClick={request}>Ask the fan to re-prove with Aadhaar</button>
       )}
       {stage === "waiting" && (
-        <p className="small">⏳ The fan opens <b>{window.location.host}/prove.html</b> at the desk, picks this request and uploads their Aadhaar QR. Only the proof comes back here.</p>
+        <div className="small">
+          <p>{got.aadhaar ? "✓" : "⏳"} The fan uploads their Aadhaar QR at <b>{window.location.host}/prove.html</b> (this request is listed there). Only the proof comes back.</p>
+          {isPass && <p>{got.phone ? "✓" : "⏳"} On their phone: ticket → <b>Help desk check</b>. The phone proves it holds the Fan Pass that entered this ticket. <span className="muted">(Dead phone? Restore the Fan Pass backup on any phone.)</span></p>}
+        </div>
       )}
       {stage === "checking" && <p className="small">Checking the proof against the blockchain…</p>}
       {result && (

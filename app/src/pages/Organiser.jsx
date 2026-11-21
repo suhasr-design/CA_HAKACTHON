@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   CROWD, EVENT, NAMES, addressOf, crowdWallet, deployment, errorText, eth, fairTickets, fastForward, fmtLeft, fmtTime,
   inventorySeats, isCrowd, isSyntheticAccount, nameOf, revealArgs, short, syntheticProof, verifyDraw, vrf, wallet,
@@ -13,7 +13,7 @@ export default function Organiser({ state, run, log }) {
   const [busy, setBusy] = useState(false);
   const [check, setCheck] = useState(null);
   const unrevealed = [...Array(state.publicSeats).keys()].filter((i) => !state.seatLabels[i]);
-  const zk = Object.values(state.regKinds).filter((k) => k === "zk").length;
+  const zk = Object.values(state.regKinds).filter((k) => k === "zk" || k === "pass").length;
   const live = state.tickets.filter((t) => t.status === 1).length;
   const waitlistLeft = state.phase === 4 ? Math.max(0, state.entrants.length - state.nextWaitlistIndex) : 0;
   const unclaimed = state.phase === 4 && now > state.claimDeadline
@@ -144,6 +144,8 @@ export default function Organiser({ state, run, log }) {
         </Card>
       </div>
 
+      <FanPassPanel />
+
       <div className="grid-2">
         <CreateEvent />
         <AssistedDesk state={state} ft={ft} run={run} />
@@ -203,6 +205,40 @@ export default function Organiser({ state, run, log }) {
         )}
       </Card>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- Fan Pass + kiosks
+function FanPassPanel() {
+  const [info, setInfo] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => fetch("/api/fanpass/tree", { cache: "no-store" }).then((r) => r.json())
+      .then((t) => alive && setInfo({ holders: t.leaves.length - t.removed.length, replaced: t.removed.length })).catch(() => {});
+    tick();
+    const t = setInterval(tick, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, []);
+  if (!deployment.fanPass) return null;
+  const kiosk = `${window.location.protocol}//${window.location.host}/kiosk.html`;
+  return (
+    <Card title="Fan Pass · prove once, join any event in seconds" icon="🪪" explain="org-fanpass"
+      right={<span className="badge badge-zk">{info ? `${info.holders} pass holders` : "…"}</span>}>
+      <div className="grid-2">
+        <div>
+          <p className="small">Fans prove their Aadhaar <b>once</b> (at a kiosk or on their phone) and get a Fan Pass in their phone’s secure storage. Every event after that, the phone makes a tiny zero-knowledge proof in seconds. Real fans can enter <b>only</b> with a Fan Pass, so one person can’t use two routes.</p>
+          <p className="tiny muted">Registry {short(deployment.fanPass.fanPass)} · shared by every event{info?.replaced ? ` · ${info.replaced} lost-phone passes retired` : ""}</p>
+        </div>
+        <div>
+          <div className="tiny muted">KIOSK MODE (box office, partner desk, this laptop)</div>
+          <div className="mono root">{kiosk}</div>
+          <div className="row">
+            <a className="btn primary" href="/kiosk.html" target="_blank" rel="noreferrer">Open kiosk</a>
+            <a className="btn ghost" href="/kiosk.html?name=Box%20office%202" target="_blank" rel="noreferrer">Second kiosk</a>
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 

@@ -27,6 +27,7 @@
     "quais": "^1.0.0-alpha.52"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.1.0"
+    "@openzeppelin/contracts": "^5.1.0",
+    "@semaphore-protocol/contracts": "^4.14.5"
   }
 }

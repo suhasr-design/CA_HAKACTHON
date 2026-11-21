@@ -7,8 +7,9 @@ import { WebView } from "react-native-webview";
 import QRCode from "react-native-qrcode-svg";
 import Svg, { Circle } from "react-native-svg";
 import {
-  NAMES, ROTATE_SECONDS, SCALPER, defaultHost, errorText, eth, fakeProof, fetchConfig, fmtLeft, inr, isSynthetic,
-  loadFanState, loadOrCreateOwnKey, makeChain, makeGatePayload, requestSponsor, short, syntheticProof,
+  NAMES, ROTATE_SECONDS, SCALPER, defaultHost, errorText, eth, fakePassProof, fakeProof, fetchConfig, fmtLeft, inr, isSynthetic,
+  loadFanState, loadOrCreateOwnKey, loadOrCreatePassSecret, loadPassCommitment, makeChain, makeGatePayload, passStatus,
+  requestSponsor, restorePassSecret, savePassCommitment, short, syntheticProof,
 } from "./src/chain";
 
 // Bright theme, same palette as the website.
@@ -25,8 +26,12 @@ export default function App() {
   const [connErr, setConnErr] = useState("");
   const [who, setWho] = useState(null);
   const [ownKey, setOwnKey] = useState(null);
+  const [passSecret, setPassSecret] = useState(null);
 
-  useEffect(() => { loadOrCreateOwnKey().then(setOwnKey).catch(() => setOwnKey(null)); }, []);
+  useEffect(() => {
+    loadOrCreateOwnKey().then(setOwnKey).catch(() => setOwnKey(null));
+    loadOrCreatePassSecret().then(setPassSecret).catch(() => setPassSecret(null));
+  }, []);
 
   // Load the event config from the laptop whenever the address changes (or on retry).
   const connect = useCallback(async (h) => {
@@ -50,12 +55,13 @@ export default function App() {
   }, [dep, host]);
 
   if (!dep || who === null) {
-    return <Picker host={host} setHost={setHost} dep={dep} connErr={connErr} retry={() => connect(host)} onPick={setWho} ownKey={ownKey} />;
+    return <Picker host={host} setHost={setHost} dep={dep} connErr={connErr} retry={() => connect(host)} onPick={setWho} ownKey={ownKey} setPassSecret={setPassSecret} />;
   }
-  return <FanApp key={dep.fairTickets} host={host} dep={dep} who={who} setWho={setWho} ownKey={ownKey} />;
+  return <FanApp key={dep.fairTickets} host={host} dep={dep} who={who} setWho={setWho} ownKey={ownKey} passSecret={passSecret} />;
 }
 
-function FanApp({ host, dep, who, setWho, ownKey }) {
+function FanApp({ host, dep, who, setWho, ownKey, passSecret }) {
+  const [backup, setBackup] = useState(false);
   const chain = useMemo(() => makeChain(host, dep, ownKey), [host, dep, ownKey]);
   const [state, setState] = useState(null);
   const [err, setErr] = useState("");
@@ -115,12 +121,15 @@ function FanApp({ host, dep, who, setWho, ownKey }) {
               <Text style={s.tiny}>{short(me)}</Text>
             </View>
           </View>
-          <Pressable onPress={() => { setWho(null); setState(null); }} style={s.chip}><Text style={s.chipT}>Switch</Text></Pressable>
+          <View style={s.row}>
+            {dep.fanPass ? <Pressable onPress={() => setBackup(true)} style={[s.chip, { marginRight: 6 }]}><Text style={s.chipT}>🪪 Pass</Text></Pressable> : null}
+            <Pressable onPress={() => { setWho(null); setState(null); }} style={s.chip}><Text style={s.chipT}>Switch</Text></Pressable>
+          </View>
         </View>
 
         {err ? <View style={s.errBox}><Text style={s.errT}>{err}</Text></View> : null}
         {!state && !err ? <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} /> : null}
-        {state ? <Fan state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} show={show} /> : null}
+        {state ? <Fan state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} show={show} refresh={refresh} secret={passSecret} /> : null}
 
         <Text style={[s.tiny, { textAlign: "center", marginTop: 24 }]}>
           Demo · local test blockchain at {host} · test ETH · Anon Aadhaar {dep.aadhaarMode === "test" ? "test mode" : "real (UIDAI)"}
@@ -128,14 +137,61 @@ function FanApp({ host, dep, who, setWho, ownKey }) {
         <Text style={[s.tiny, { textAlign: "center", marginTop: 4 }]}>Official event contract {short(dep.fairTickets)} · check it on the organiser’s website</Text>
       </ScrollView>
       {toast ? <Toast toast={toast} onClose={() => setToast(null)} /> : null}
+      <Modal visible={backup} animationType="slide" onRequestClose={() => setBackup(false)}>
+        <ScrollView style={s.root} contentContainerStyle={s.scroll}>
+          <Text style={s.h1}>Fan Pass backup</Text>
+          <Text style={[s.muted, { marginTop: 8 }]}>If this phone is lost or dies, this code restores your Fan Pass on a new phone (start screen → “Restore my Fan Pass”). Anyone with this code can use your pass: write it on paper, never share or screenshot it.</Text>
+          <View style={[s.card, { borderColor: C.amber, backgroundColor: C.amberSoft }]}>
+            <Text selectable style={[s.addr, { fontSize: 15, lineHeight: 22 }]}>{(passSecret || "").match(/.{1,8}/g)?.join(" ")}</Text>
+          </View>
+          <Text style={[s.tiny, { marginTop: 8 }]}>Lost the code too? Get a new pass at a kiosk with a freshly downloaded Aadhaar QR: the old phone’s pass is retired automatically.</Text>
+          <Btn primary label="Done" onPress={() => setBackup(false)} />
+        </ScrollView>
+      </Modal>
     </View>
   );
 }
 
+// ---------------------------------------------------------------- Fan Pass web page (runs on this phone)
+// The secret is injected into the page before it loads; it is never part of a URL or network request.
+function PassWeb({ mode, chain, wallet, secret, onMessage, onClose }) {
+  const inject = `window.FT_PASS_SECRET=${JSON.stringify(secret || "")};true;`;
+  // Fixed per opening, so the app's 3-second refreshes don't reload the page mid-proof.
+  const source = useMemo(() => (mode ? { uri: `${chain.passUrl}?mode=${mode}&wallet=${wallet}&t=${Date.now()}` } : null), [mode, wallet, chain.passUrl]);
+  return (
+    <Modal visible={!!mode} animationType="slide" onRequestClose={onClose}>
+      <View style={s.root}>
+        <View style={s.modalHead}>
+          <Text style={s.h2}>Fan Pass</Text>
+          <Pressable onPress={onClose} style={s.chip}><Text style={s.chipT}>Close</Text></Pressable>
+        </View>
+        {mode ? (
+          <WebView
+            source={source}
+            injectedJavaScriptBeforeContentLoaded={inject}
+            onMessage={(e) => { try { onMessage(JSON.parse(e.nativeEvent.data)); } catch {} }}
+            javaScriptEnabled domStorageEnabled allowFileAccess mixedContentMode="always"
+            startInLoadingState renderLoading={() => <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} />}
+            style={{ flex: 1, backgroundColor: C.bg }}
+          />
+        ) : null}
+      </View>
+    </Modal>
+  );
+}
+
 // ---------------------------------------------------------------- start: whose phone is this?
-function Picker({ host, setHost, dep, connErr, retry, onPick, ownKey }) {
+function Picker({ host, setHost, dep, connErr, retry, onPick, ownKey, setPassSecret }) {
   const [h, setH] = useState(host);
+  const [demo, setDemo] = useState(false);
+  const [restore, setRestore] = useState(false);
+  const [code, setCode] = useState("");
+  const [restoreMsg, setRestoreMsg] = useState("");
   const ev = dep?.event || {};
+  const doRestore = async () => {
+    try { setPassSecret(await restorePassSecret(code)); setRestoreMsg("✓ Fan Pass restored on this phone."); setCode(""); }
+    catch (e) { setRestoreMsg(errorText(e)); }
+  };
   return (
     <View style={s.root}>
       <StatusBar style="dark" />
@@ -156,18 +212,30 @@ function Picker({ host, setHost, dep, connErr, retry, onPick, ownKey }) {
             ) : <ActivityIndicator color={C.accent} style={{ marginTop: 8 }} />}
         </View>
 
-        <Text style={[s.label, { marginTop: 18 }]}>REAL FAN</Text>
-        <Pressable disabled={!dep || !ownKey} onPress={() => onPick("me")} style={({ pressed }) => [s.pick, s.pickMe, (pressed || !dep || !ownKey) && { opacity: 0.5 }]}>
-          <Avatar name="Me" />
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={s.pickT}>Use my own wallet</Text>
-            <Text style={s.tiny}>Created on this phone, kept in secure storage. Prove with your real Aadhaar.</Text>
+        {dep?.event?.title ? (
+          <View style={[s.event, { marginTop: 16 }]}>
+            <Text style={s.eventTop}>NOW BOOKING · FAIR LOTTERY</Text>
+            <Text style={s.eventT}>{ev.title}</Text>
+            <Text style={s.eventS}>{ev.venue}</Text>
+            <Text style={s.eventS}>{[ev.startsAt ? new Date(ev.startsAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }) : "", inr(ev.priceInr), `${ev.publicSeats} seats`].filter(Boolean).join(" · ")}</Text>
           </View>
-          <Text style={s.muted}>›</Text>
-        </Pressable>
+        ) : null}
 
-        <Text style={[s.label, { marginTop: 18 }]}>DEMO IDENTITIES (LABELLED)</Text>
-        {NAMES.map((n, i) => i === 0 ? null : (
+        <Btn primary label={ownKey ? "Book a ticket  →" : "Preparing your wallet…"} busy={!dep || !ownKey} onPress={() => onPick("me")} />
+        <Text style={[s.tiny, { marginTop: 6, textAlign: "center" }]}>Your wallet and Fan Pass are created on this phone and kept in secure storage.</Text>
+
+        <Pressable onPress={() => setRestore((x) => !x)}><Text style={[s.link, { marginTop: 16 }]}>{restore ? "▾" : "▸"} New phone? Restore my Fan Pass</Text></Pressable>
+        {restore && (
+          <View style={s.card}>
+            <Text style={s.tiny}>Enter the 64-character backup code from your old phone (🪪 Pass → backup).</Text>
+            <TextInput value={code} onChangeText={setCode} style={[s.input, { fontSize: 13, marginTop: 8 }]} autoCapitalize="none" autoCorrect={false} placeholder="backup code" placeholderTextColor="#9AA3B8" />
+            <Btn label="Restore" onPress={doRestore} />
+            {restoreMsg ? <Text style={[s.tiny, { marginTop: 6 }]}>{restoreMsg}</Text> : null}
+          </View>
+        )}
+
+        <Pressable onPress={() => setDemo((x) => !x)}><Text style={[s.link, { marginTop: 12 }]}>{demo ? "▾" : "▸"} Demo identities (labelled, for the stage demo)</Text></Pressable>
+        {demo && NAMES.map((n, i) => i === 0 ? null : (
           <Pressable key={i} disabled={!dep} onPress={() => onPick(i)} style={({ pressed }) => [s.pick, (pressed || !dep) && { opacity: 0.5 }]}>
             <Avatar name={n} />
             <View style={{ flex: 1, marginLeft: 12 }}>
@@ -185,7 +253,7 @@ function Picker({ host, setHost, dep, connErr, retry, onPick, ownKey }) {
 }
 
 // ---------------------------------------------------------------- main fan flow
-function Fan({ state, who, me, ft, chain, run, busy, show }) {
+function Fan({ state, who, me, ft, chain, run, busy, show, refresh, secret }) {
   const shuffled = state.phase === 4;
   const isWinner = shuffled && state.position >= 0 && state.position < state.winnerCount;
   const waitRank = shuffled && state.position >= state.winnerCount ? state.position - state.winnerCount + 1 : null;
@@ -214,7 +282,9 @@ function Fan({ state, who, me, ft, chain, run, busy, show }) {
         ))}
       </View>
 
-      {!state.registered && state.phase === 1 && <Verify state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} show={show} />}
+      {!state.registered && state.phase === 1 && (chain.dep.fanPass
+        ? <PassVerify state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} show={show} refresh={refresh} secret={secret} />
+        : <Verify state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} show={show} />)}
       {!state.registered && state.phase !== 1 && <Card><Text style={s.muted}>Registration is closed for this event.</Text></Card>}
 
       {state.registered && !shuffled && (
@@ -269,7 +339,7 @@ function Fan({ state, who, me, ft, chain, run, busy, show }) {
         </Card>
       )}
 
-      {state.myTicket && <Ticket state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} />}
+      {state.myTicket && <Ticket state={state} who={who} me={me} ft={ft} chain={chain} run={run} busy={busy} show={show} secret={secret} />}
 
       {state.refund > 0n && (
         <Card center tone="good">
@@ -282,7 +352,86 @@ function Fan({ state, who, me, ft, chain, run, busy, show }) {
   );
 }
 
-// ---------------------------------------------------------------- step 1: verify
+// ---------------------------------------------------------------- step 1: Fan Pass (prove once) + join (seconds)
+function PassVerify({ state, who, me, ft, chain, run, busy, show, refresh, secret }) {
+  const isBot = who === SCALPER;
+  const [member, setMember] = useState(null); // null = checking
+  const [web, setWeb] = useState(null);       // "enroll" | "register"
+  useEffect(() => {
+    let alive = true;
+    loadPassCommitment().then(async (c) => {
+      if (!c) { alive && setMember(false); return; }
+      try { const st = await passStatus(chain.host, c); alive && setMember(!!st.member); } catch { alive && setMember(false); }
+    });
+    return () => { alive = false; };
+  }, [chain.host, secret]);
+
+  const onMessage = async (m) => {
+    if (m.type === "pass") {
+      await savePassCommitment(m.commitment);
+      setMember(true);
+      setWeb(null);
+      show(true, "Fan Pass active", "From now on, joining any event takes seconds.");
+    } else if (m.type === "registered") {
+      setWeb(null);
+      show(true, `Registered in ${m.seconds}s with your Fan Pass`, m.funded ? `${m.funded} test ETH added for the ticket (stands in for UPI).` : undefined);
+      refresh();
+    } else if (m.type === "error") {
+      setWeb(null);
+      show(false, "Couldn’t register", m.error);
+    }
+  };
+
+  if (isBot) {
+    return (
+      <Card>
+        <Text style={s.h3}>Scalper bot</Text>
+        <View style={s.botBox}><Text style={s.ink}>🤖 Thousands of wallets, but no Fan Pass: it never proved a real Aadhaar.</Text></View>
+        <Btn danger busy={busy} label="Try joining with a made-up pass proof" onPress={() => run("Bot registration", () => ft.registerWithPass(me, fakePassProof(me, chain.dep.fanPass.passScope)))} />
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <Text style={s.h3}>Join the draw</Text>
+      <View style={[s.stepRow, member && { opacity: 0.7 }]}>
+        <Text style={[s.stepBadge, member && { backgroundColor: C.good }]}>{member ? "✓" : "1"}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={s.pickT}>Fan Pass {member ? "active" : "(once)"}</Text>
+          <Text style={s.tiny}>{member ? "You’ve proved you’re a unique, real person. Valid for every event." : "Prove your Aadhaar one time, at a kiosk (2–5 min) or on this phone. Nobody learns who you are."}</Text>
+        </View>
+      </View>
+      {member === false && <Btn primary busy={busy} label="🪪  Get my Fan Pass" onPress={() => setWeb("enroll")} />}
+      {member === null && <ActivityIndicator color={C.accent} style={{ marginVertical: 8 }} />}
+
+      <View style={[s.stepRow, { marginTop: 12 }, !member && { opacity: 0.5 }]}>
+        <Text style={s.stepBadge}>2</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={s.pickT}>Enter this event’s lottery (seconds)</Text>
+          <Text style={s.tiny}>Your phone makes a tiny proof: “I hold a Fan Pass”, with a code unique to you for this event only.</Text>
+        </View>
+      </View>
+      <Btn primary busy={busy || !member} label="🎲  Join the draw" onPress={() => setWeb("register")} />
+
+      {isSynthetic(chain.dep, who) && (
+        <Btn busy={busy} label="Quick join (synthetic demo fan)" onPress={() => run("Joined as a synthetic demo fan", () => {
+          const p = syntheticProof(NAMES[who]);
+          return ft.register(p.nullifier, p.timestamp, p.revealArray, p.groth16Proof);
+        })} />
+      )}
+      {who === "me" && (
+        <View style={s.addrBox}>
+          <Text style={s.tiny}>No Aadhaar (foreign visitor, minor)? Show this wallet address at the organiser’s ID desk:</Text>
+          <Text selectable style={s.addr}>{me}</Text>
+        </View>
+      )}
+      <Text style={[s.tiny, { marginTop: 10 }]}>Registration closes in {fmtLeft(state.regCloses - state.chainTime)}</Text>
+      <PassWeb mode={web} chain={chain} wallet={me} secret={secret} onMessage={onMessage} onClose={() => setWeb(null)} />
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------- step 1 (events without Fan Pass): direct Aadhaar
 function Verify({ state, who, me, ft, chain, run, busy, show }) {
   const [open, setOpen] = useState(false);
   const isBot = who === SCALPER;
@@ -356,8 +505,9 @@ function Verify({ state, who, me, ft, chain, run, busy, show }) {
 }
 
 // ---------------------------------------------------------------- ticket
-function Ticket({ state, who, me, ft, chain, run, busy }) {
+function Ticket({ state, who, me, ft, chain, run, busy, show, secret }) {
   const t = state.myTicket;
+  const [desk, setDesk] = useState(null);
   const [payload, setPayload] = useState("");
   const [left, setLeft] = useState(ROTATE_SECONDS);
   const [confirm, setConfirm] = useState(false);
@@ -368,6 +518,8 @@ function Ticket({ state, who, me, ft, chain, run, busy }) {
 
   useEffect(() => {
     let alive = true;
+    // Show "updating" immediately so a typed gate code feels instant; the signature follows in ms.
+    if (gateCode) setPayload("");
     const regen = async () => {
       const p = await makeGatePayload(signer, chain.dep.fairTickets, t.id, gateCode);
       if (alive) { setPayload(p); setLeft(ROTATE_SECONDS); }
@@ -421,9 +573,15 @@ function Ticket({ state, who, me, ft, chain, run, busy }) {
           {!confirm
             ? <Btn busy={busy} label="Can’t attend? Sell back at face value" onPress={() => setConfirm(true)} />
             : <Btn warn busy={busy} label={`Confirm: return for ${eth(state.facePrice)}`} onPress={() => { setConfirm(false); run(`Ticket #${t.id} returned`, () => ft.sellBack(t.id)); }} />}
+          {chain.dep.fanPass ? <Btn busy={busy} label="🛟  Help desk check" onPress={() => setDesk("desk")} /> : null}
           <Btn danger busy={busy} label="Try selling it to a scalper" onPress={() => run("Transfer to scalper", () => ft.transferFrom(me, chain.wallets[SCALPER].address, t.id))} />
         </>
       )}
+      {chain.dep.fanPass ? (
+        <PassWeb mode={desk} chain={chain} wallet={me} secret={secret}
+          onMessage={(m) => { if (m.type === "desk") { setDesk(null); show(true, "Sent to the help desk", "The desk can now confirm this ticket is yours."); } }}
+          onClose={() => setDesk(null)} />
+      ) : null}
     </View>
   );
 }
@@ -507,6 +665,9 @@ const s = StyleSheet.create({
   chipT: { color: C.ink, fontSize: 13 },
   pick: { flexDirection: "row", alignItems: "center", backgroundColor: C.card, borderColor: C.line, borderWidth: 1, borderRadius: 14, padding: 12, marginTop: 8 },
   pickMe: { borderColor: C.accent, backgroundColor: C.accentSoft },
+  link: { color: C.accent, fontSize: 14, fontWeight: "600" },
+  stepRow: { flexDirection: "row", alignItems: "flex-start", marginTop: 8 },
+  stepBadge: { width: 26, height: 26, borderRadius: 13, backgroundColor: C.accent, color: "#fff", textAlign: "center", lineHeight: 26, fontWeight: "800", marginRight: 10, overflow: "hidden" },
   pickT: { color: C.ink, fontSize: 16, fontWeight: "600" },
   avatar: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
   avatarT: { color: "#fff", fontWeight: "800", fontSize: 16 },

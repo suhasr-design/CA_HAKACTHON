@@ -15,6 +15,8 @@ export default defineConfig({
         main: resolve(__dirname, "index.html"),
         aadhaar: resolve(__dirname, "aadhaar.html"),
         prove: resolve(__dirname, "prove.html"),
+        fanpass: resolve(__dirname, "fanpass.html"),
+        kiosk: resolve(__dirname, "kiosk.html"),
       },
     },
   },

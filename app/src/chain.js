@@ -120,6 +120,7 @@ async function registrationKinds(ft) {
         const tx = await provider.getTransaction(e.transactionHash);
         const parsed = ft.interface.parseTransaction({ data: tx.data });
         if (parsed.name === "assistedRegister") regKindCache.set(e.transactionHash, "assisted");
+        else if (parsed.name === "registerWithPass") regKindCache.set(e.transactionHash, "pass");
         else regKindCache.set(e.transactionHash, parsed.args.groth16Proof.every((x) => x === 0n) ? "synthetic" : "zk");
       }
       out[fan] = regKindCache.get(e.transactionHash);

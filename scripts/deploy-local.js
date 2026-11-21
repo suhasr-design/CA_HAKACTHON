@@ -10,6 +10,28 @@ const { ethers } = require("hardhat");
 const { buildInventory } = require("./lib/inventory");
 const { loadEventConfig, crowdName } = require("./lib/eventConfig");
 const { UIDAI_KEY_HASHES, TEST_KEY_HASH } = require("./lib/aadhaarKeys");
+const { FANPASS_SEED, TREE_DEPTH, deployFanPass } = require("./lib/fanpass");
+
+// The Fan Pass registry outlives events: fans enrol once and keep their pass for every new event.
+// It's reused while it still exists on the running chain (a restarted Hardhat node starts fresh).
+const FANPASS_FILE = path.join(__dirname, "..", "deployments", "local-fanpass.json");
+async function getOrDeployFanPass(keyHashes, mode) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(FANPASS_FILE, "utf8"));
+    if (saved.mode === mode && (await ethers.provider.getCode(saved.fanPass)) !== "0x") return saved;
+  } catch {}
+  const groth16 = await (await ethers.getContractFactory("Verifier")).deploy();
+  const anon = await (await ethers.getContractFactory("AnonAadhaarMultiKey")).deploy(await groth16.getAddress(), keyHashes);
+  const { fanPass, semaphore } = await deployFanPass(ethers, await anon.getAddress(), FANPASS_SEED);
+  const saved = {
+    mode, fanPass: await fanPass.getAddress(), semaphore: await semaphore.getAddress(), anonAadhaar: await anon.getAddress(),
+    groupId: (await fanPass.groupId()).toString(), seed: FANPASS_SEED.toString(), treeDepth: TREE_DEPTH, deployedAt: new Date().toISOString(),
+  };
+  fs.mkdirSync(path.dirname(FANPASS_FILE), { recursive: true });
+  fs.writeFileSync(FANPASS_FILE, JSON.stringify(saved, null, 2));
+  console.log("Fan Pass registry deployed:", saved.fanPass);
+  return saved;
+}
 
 const AADHAAR_MODE = (process.env.AADHAAR_MODE || "real").toLowerCase() === "test" ? "test" : "real";
 const MNEMONIC = "test test test test test test test test test test test junk"; // Hardhat's PUBLIC test mnemonic
@@ -50,6 +72,10 @@ async function main() {
   const inv = buildInventory({ publicSeats: ev.publicSeats, sponsorSeats: ev.sponsorSeats, holdSeats: ev.holdSeats });
   await (await ft.commitInventory(inv.root, ev.publicSeats, ev.sponsorSeats, ev.holdSeats)).wait();
   await (await ft.setAssistedCap(ev.assistedCap)).wait();
+  // Real fans enter with their Fan Pass only (the labelled demo crowd keeps its synthetic route).
+  const pass = await getOrDeployFanPass(keyHashes, AADHAAR_MODE);
+  await (await ft.setFanPass(pass.fanPass, true)).wait();
+  const passScope = (await ft.passScope()).toString();
   const now = (await ethers.provider.getBlock("latest")).timestamp;
   await (await ft.openRegistration(now + ev.registrationMinutes * 60, now + ev.buybackDays * 86400)).wait();
 
@@ -79,6 +105,7 @@ async function main() {
     // Labelled synthetic crowd. Their keys come from Hardhat's PUBLIC test mnemonic: local test ETH only.
     crowd,
     nullifierSeed: nullifierSeed.toString(),
+    fanPass: { ...pass, passScope, abi: artifact("FanPass.sol/FanPass.json") },
     abi: {
       fairTickets: artifact("FairTickets.sol/FairTickets.json"),
       vrf: artifact("mocks/MockVRFCoordinator.sol/MockVRFCoordinator.json"),
@@ -99,6 +126,7 @@ async function main() {
     nullifierSeed: out.nullifierSeed,
     aadhaarMode: AADHAAR_MODE,
     event,
+    fanPass: { address: pass.fanPass, seed: pass.seed, passScope, treeDepth: pass.treeDepth },
     syntheticAccounts: NAMED_SYNTHETIC,
     demoKeys: named.map((w) => w.privateKey), // PUBLIC Hardhat test keys, local test ETH only
     abi: out.abi.fairTickets,
