@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ethers } from "ethers";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { QRCodeSVG } from "qrcode.react";
 import { CROWD, NAMES, addressOf, crowdWallet, deployment, errorText, fairTickets, nameOf, provider, wallet } from "../chain";
 import { GATE_CODE_SECONDS, makePayload, newGateCode, verifyPayload } from "../gateQr";
 import { Avatar, Card, Explain, Stat, beep } from "../ui.jsx";
@@ -219,9 +220,16 @@ export default function Gate({ state }) {
 
         <div className="stack">
           <Card title={`${gate} code`} icon="🔢" explain="gate-code">
-            <div className="gate-code">{requireCode ? codes.cur : "––––"}</div>
+            <div className="gate-code-row">
+              {requireCode && (
+                <div className="gate-code-qr" title="Fans scan this with the Fair Tickets app">
+                  <QRCodeSVG value={`FTGATE|${deployment.fairTickets.toLowerCase()}|${gate}|${codes.cur}`} size={150} level="M" marginSize={2} />
+                </div>
+              )}
+              <div className="gate-code">{requireCode ? codes.cur : "––––"}</div>
+            </div>
             <div className="gate-code-bar"><div style={{ width: `${(codes.left / GATE_CODE_SECONDS) * 100}%` }} /></div>
-            <p className="tiny muted center">{requireCode ? `Fans type this into the app; their QR is signed for it. New code in ${codes.left}s.` : "Gate code off: time-based QRs accepted."}</p>
+            <p className="tiny muted center">{requireCode ? `Fans scan this QR with the app (or type the digits); their ticket QR is signed for it. New code in ${codes.left}s.` : "Gate code off: time-based QRs accepted."}</p>
           </Card>
           <div key={flash} className={`scanner ${latest ? (latest.ok ? "scan-ok" : "scan-bad") : ""}`}>
             {!latest ? (

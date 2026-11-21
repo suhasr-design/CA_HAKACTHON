@@ -5,6 +5,7 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { WebView } from "react-native-webview";
 import QRCode from "react-native-qrcode-svg";
+import { CameraView, useCameraPermissions } from "expo-camera";
 import Svg, { Circle } from "react-native-svg";
 import {
   NAMES, ROTATE_SECONDS, SCALPER, defaultHost, errorText, eth, fakePassProof, fakeProof, fetchConfig, fmtLeft, inr, isSynthetic,
@@ -512,8 +513,22 @@ function Ticket({ state, who, me, ft, chain, run, busy, show, secret }) {
   const [left, setLeft] = useState(ROTATE_SECONDS);
   const [confirm, setConfirm] = useState(false);
   const [code, setCode] = useState("");
+  const [gateName, setGateName] = useState("");
+  const [scanning, setScanning] = useState(false);
+  const [codeLeft, setCodeLeft] = useState(0);
   const returning = t.status === 2;
   const gateCode = /^\d{4}$/.test(code) ? code : null;
+
+  // A gate code is only accepted for ~40 s, then the fan scans again.
+  useEffect(() => {
+    if (!gateCode) { setCodeLeft(0); return; }
+    setCodeLeft(GATE_CODE_TTL);
+    const t2 = setInterval(() => setCodeLeft((x) => {
+      if (x <= 1) { clearInterval(t2); setCode(""); setGateName(""); return 0; }
+      return x - 1;
+    }), 1000);
+    return () => clearInterval(t2);
+  }, [gateCode]);
   const signer = chain.signerOf(who);
 
   useEffect(() => {
@@ -549,13 +564,18 @@ function Ticket({ state, who, me, ft, chain, run, busy, show, secret }) {
           <Text style={s.returning}>Being returned: waiting for the next fan on the waitlist to accept.</Text>
         ) : (
           <View style={s.qrRow}>
-            <Text style={s.label}>AT THE GATE: TYPE THE CODE ON ITS SCREEN</Text>
-            <TextInput value={code} onChangeText={(v) => setCode(v.replace(/\D/g, "").slice(0, 4))} placeholder="4-digit gate code"
+            <Text style={s.label}>AT THE GATE</Text>
+            <Pressable onPress={() => setScanning(true)} style={({ pressed }) => [s.btn, s.btnP, { marginTop: 0, marginBottom: 10, width: 260 }, pressed && { opacity: 0.7 }]}>
+              <Text style={[s.btnT, { color: "#fff" }]}>📷  Scan gate code</Text>
+            </Pressable>
+            <TextInput value={code} onChangeText={(v) => { setGateName(""); setCode(v.replace(/\D/g, "").slice(0, 4)); }} placeholder="or type the 4 digits"
               keyboardType="number-pad" maxLength={4} style={s.codeInput} placeholderTextColor="#9AA3B8" />
             <View style={s.qrBox}>{payload ? <QRCode value={payload} size={230} ecl="L" quietZone={14} color="#000000" backgroundColor="#FFFFFF" /> : <ActivityIndicator />}</View>
             <View style={{ alignItems: "center", marginTop: 12 }}>
               {gateCode ? (
-                <Text style={[s.ticketNote, { color: C.good, fontWeight: "700" }]}>✓ Signed for gate code {gateCode}. Only valid at that gate, right now.</Text>
+                <Text style={[s.ticketNote, { color: C.good, fontWeight: "700" }]}>
+                  ✓ Signed for {gateName || "gate"} code {gateCode}. Show this now · valid {codeLeft}s
+                </Text>
               ) : (
                 <>
                   <Ring left={left} total={ROTATE_SECONDS} />
@@ -577,12 +597,74 @@ function Ticket({ state, who, me, ft, chain, run, busy, show, secret }) {
           <Btn danger busy={busy} label="Try selling it to a scalper" onPress={() => run("Transfer to scalper", () => ft.transferFrom(me, chain.wallets[SCALPER].address, t.id))} />
         </>
       )}
+      <ScanGate open={scanning} contract={chain.dep.fairTickets} onClose={() => setScanning(false)}
+        onCode={(c, g) => { setScanning(false); setGateName(g); setCode(c); }} />
       {chain.dep.fanPass ? (
         <PassWeb mode={desk} chain={chain} wallet={me} secret={secret}
           onMessage={(m) => { if (m.type === "desk") { setDesk(null); show(true, "Sent to the help desk", "The desk can now confirm this ticket is yours."); } }}
           onClose={() => setDesk(null)} />
       ) : null}
     </View>
+  );
+}
+
+// ---------------------------------------------------------------- scan the gate's code QR
+// The gate screen shows "FTGATE|<event contract>|<gate>|<4-digit code>" as a QR (changes every 20 s).
+// The gate accepts its current and previous 20-second codes, so a freshly scanned code is valid for at
+// least 20 s (up to 40 s). The app counts down the guaranteed 20 s, then asks for a re-scan.
+const GATE_CODE_TTL = 20;
+function parseGateQr(data, contract) {
+  const t = String(data || "").trim();
+  if (/^\d{4}$/.test(t)) return { ok: true, code: t, gate: "" };
+  if (/^FT[23]\./.test(t) || t.startsWith("{")) return { ok: false, error: "That’s a ticket QR. Point the camera at the code on the gate screen." };
+  const m = t.match(/^FTGATE\|(0x[0-9a-fA-F]{40})\|([^|]{1,20})\|(\d{4})$/);
+  if (!m) return { ok: false, error: "Not a Fair Tickets gate code." };
+  if (m[1].toLowerCase() !== contract.toLowerCase()) return { ok: false, error: "This gate is for a different event." };
+  return { ok: true, code: m[3], gate: m[2] };
+}
+
+function ScanGate({ open, contract, onCode, onClose }) {
+  const [perm, requestPerm] = useCameraPermissions();
+  const [msg, setMsg] = useState("");
+  const done = useRef(false);
+  useEffect(() => {
+    if (!open) return;
+    done.current = false;
+    setMsg("");
+    if (perm && !perm.granted && perm.canAskAgain) requestPerm();
+  }, [open, perm?.granted]);
+  return (
+    <Modal visible={open} animationType="slide" onRequestClose={onClose}>
+      <View style={[s.root, { backgroundColor: "#000" }]}>
+        <View style={s.modalHead}>
+          <Text style={s.h2}>Scan the gate code</Text>
+          <Pressable onPress={onClose} style={s.chip}><Text style={s.chipT}>Close</Text></Pressable>
+        </View>
+        {!perm ? <ActivityIndicator color={C.accent} style={{ marginTop: 40 }} />
+          : !perm.granted ? (
+            <View style={[s.card, { margin: 18 }]}>
+              <Text style={s.muted}>Fair Tickets needs the camera to read the code on the gate screen. Nothing is recorded.</Text>
+              <Btn primary label="Allow camera" onPress={requestPerm} />
+              <Text style={[s.tiny, { marginTop: 8 }]}>Or close this and type the 4 digits instead.</Text>
+            </View>
+          ) : (
+            <View style={{ flex: 1 }}>
+              {open ? (
+                <CameraView style={{ flex: 1 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                  onBarcodeScanned={({ data }) => {
+                    if (done.current) return;
+                    const r = parseGateQr(data, contract);
+                    if (r.ok) { done.current = true; onCode(r.code, r.gate); } else setMsg(r.error);
+                  }} />
+              ) : null}
+              <View style={s.scanFrame} pointerEvents="none" />
+              <View style={s.scanHint}>
+                <Text style={{ color: "#fff", fontWeight: "700", textAlign: "center" }}>{msg || "Point the camera at the QR next to the gate’s 4-digit code"}</Text>
+              </View>
+            </View>
+          )}
+      </View>
+    </Modal>
   );
 }
 
@@ -666,6 +748,8 @@ const s = StyleSheet.create({
   pick: { flexDirection: "row", alignItems: "center", backgroundColor: C.card, borderColor: C.line, borderWidth: 1, borderRadius: 14, padding: 12, marginTop: 8 },
   pickMe: { borderColor: C.accent, backgroundColor: C.accentSoft },
   link: { color: C.accent, fontSize: 14, fontWeight: "600" },
+  scanFrame: { position: "absolute", top: "22%", left: "15%", width: "70%", aspectRatio: 1, borderWidth: 4, borderColor: "#ffffffcc", borderRadius: 24 },
+  scanHint: { position: "absolute", left: 16, right: 16, bottom: 40, backgroundColor: "#000000aa", borderRadius: 14, padding: 14 },
   stepRow: { flexDirection: "row", alignItems: "flex-start", marginTop: 8 },
   stepBadge: { width: 26, height: 26, borderRadius: 13, backgroundColor: C.accent, color: "#fff", textAlign: "center", lineHeight: 26, fontWeight: "800", marginRight: 10, overflow: "hidden" },
   pickT: { color: C.ink, fontSize: 16, fontWeight: "600" },

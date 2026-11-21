@@ -184,6 +184,8 @@ select:focus, input:focus, textarea:focus { outline: 2px solid var(--accent); ou
 .use-i { font-size: 24px; }
 .use-t { font-weight: 700; font-family: "Space Grotesk"; }
 .gate-code { font-family: "Space Grotesk"; font-size: 64px; font-weight: 700; letter-spacing: 0.18em; color: var(--accent-deep); text-align: center; line-height: 1; }
+.gate-code-row { display: flex; align-items: center; justify-content: center; gap: 22px; flex-wrap: wrap; }
+.gate-code-qr { background: #fff; padding: 8px; border-radius: 14px; border: 1px solid var(--line); line-height: 0; }
 .gate-code-bar { height: 6px; border-radius: 999px; background: #E2E8F2; overflow: hidden; margin: 10px 0 4px; }
 .gate-code-bar div { height: 100%; background: var(--accent); transition: width 1s linear; }
 .gate-pick { display: flex; gap: 6px; flex-wrap: wrap; }

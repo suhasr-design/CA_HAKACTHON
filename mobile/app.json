@@ -31,7 +31,14 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Fair Tickets uses the camera to scan the gate's code QR when you enter the venue.",
+          "recordAudioAndroid": false
+        }
+      ]
     ],
     "extra": {
       "defaultHost": "192.168.8.97",
