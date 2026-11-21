@@ -115,6 +115,8 @@ export default function App() {
               <span className="switch-ui" /> Presenter notes
             </label>
             <span className="mobile-pill" title="Fans use the Fair Tickets Android app">📱 Fans: Android app</span>
+            <button className="btn primary sm refresh-btn" title="Reload this page with the latest data from the blockchain (Ctrl+R)"
+              onClick={() => window.location.reload()}>↻ Refresh</button>
           </div>
         </header>
 
