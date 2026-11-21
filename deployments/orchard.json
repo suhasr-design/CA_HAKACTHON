@@ -1,0 +1,96 @@
+{
+  "network": "Quai Orchard Cyprus-1",
+  "chainId": 15000,
+  "rpc": "https://orchard.rpc.quai.network/cyprus1",
+  "deployer": "0x00090270922702553C50eeCAC05993D4131e1323",
+  "deployedAt": "2026-11-21T01:57:28.420Z",
+  "metadataPinned": false,
+  "contracts": {
+    "Verifier": {
+      "address": "0x000e5c237942D6756007b045E19134B2AA75bc1F",
+      "txHash": "0x006a0036b254a762d93d19e451197f4032063c7b7d0fa96d9f5bb2b8794e2192",
+      "ipfsHash": "Qmdc8y5tEPspDfwGdEEvVzNfXnVfCJjN9VsZ7eViyM8iqQ",
+      "abiPath": "artifacts/@anon-aadhaar/contracts/src/Verifier.sol/Verifier.json",
+      "explorer": "https://orchard.quaiscan.io/address/0x000e5c237942D6756007b045E19134B2AA75bc1F"
+    },
+    "AnonAadhaarMultiKey": {
+      "address": "0x0014275f33B2Ac452D9eC554D436150b87018B99",
+      "txHash": "0x0045006b7103ad9fe85f2764f362b7aa542cfe8c42ec4f4803e0b936f841b684",
+      "ipfsHash": "QmaVe93ZfN5HrLegL1LqB5LYpqQ38UvfHfSMnq9UaEfKaX",
+      "abiPath": "artifacts/contracts/anon/AnonAadhaarMultiKey.sol/AnonAadhaarMultiKey.json",
+      "explorer": "https://orchard.quaiscan.io/address/0x0014275f33B2Ac452D9eC554D436150b87018B99"
+    },
+    "PoseidonT3": {
+      "address": "0x0044c69f92e34e76491527e69A526191ae8ffc8a",
+      "txHash": "0x00080011c3a201b4ad9e376a9fb89ddb41ec9186d82530a87c7e2cd57e03b49c",
+      "ipfsHash": "QmQMSxy9WR5v8vRFq3cAmE1735rsQvAqWWsBWvwCJQcSNp",
+      "abiPath": "artifacts/poseidon-solidity/PoseidonT3.sol/PoseidonT3.json",
+      "explorer": "https://orchard.quaiscan.io/address/0x0044c69f92e34e76491527e69A526191ae8ffc8a"
+    },
+    "SemaphoreVerifier": {
+      "address": "0x00289e8aAf663f1CCE1F2B0BFD833A6d19cfc306",
+      "txHash": "0x005f007085a6dbc2fda841cabb5539a59665ef9952c139b7a1e7b6d7e4021ea8",
+      "ipfsHash": "QmSEwFmcEKjBSmiiRYqfZ3gEjKiPnQS8AHMnEcfhCzdGYk",
+      "abiPath": "artifacts/@semaphore-protocol/contracts/base/SemaphoreVerifier.sol/SemaphoreVerifier.json",
+      "explorer": "https://orchard.quaiscan.io/address/0x00289e8aAf663f1CCE1F2B0BFD833A6d19cfc306"
+    },
+    "Semaphore": {
+      "address": "0x005f6fC400bc674b0c9CE73f5F9214f3070cB522",
+      "txHash": "0x006e005edd462396993b5e7cc4a300c6ae6177cd9b289d5fa885f78fdc3c4028",
+      "ipfsHash": "QmdSbDuG2TghcR18tYjwTFDKjyEj6sH1XZgbwdXsVh379N",
+      "abiPath": "artifacts/@semaphore-protocol/contracts/Semaphore.sol/Semaphore.json",
+      "explorer": "https://orchard.quaiscan.io/address/0x005f6fC400bc674b0c9CE73f5F9214f3070cB522"
+    },
+    "FanPass": {
+      "address": "0x006D6d94bD5c7FEbC8c822D57eE343f60C8DE1A7",
+      "txHash": "0x006d000d8fecb4a998eb62a6773c0b86afb2d721305ad8ed35ca6cf2cc1036ac",
+      "ipfsHash": "QmXzRm1eHvrfZ2r78sQsRzgFHmX96CscByjvZQeHUL3Hhk",
+      "abiPath": "artifacts/contracts/FanPass.sol/FanPass.json",
+      "explorer": "https://orchard.quaiscan.io/address/0x006D6d94bD5c7FEbC8c822D57eE343f60C8DE1A7"
+    },
+    "FairTicketsCommitReveal": {
+      "address": "0x00656AdF0C007CD7B6e0d089727d26806D1Caebf",
+      "txHash": "0x00250038ad7730e44484f490d570d64918b8e5d8584580f6835ed4f36b3925f4",
+      "ipfsHash": "QmWfWGhD62qrX5gNauvyQ7BCd7yb52ZSEp8YnUaXP8SEtV",
+      "abiPath": "artifacts/contracts/FairTicketsCommitReveal.sol/FairTicketsCommitReveal.json",
+      "explorer": "https://orchard.quaiscan.io/address/0x00656AdF0C007CD7B6e0d089727d26806D1Caebf"
+    }
+  },
+  "setupTxs": {
+    "commitInventory": "0x0078006cfc859a959394f467333caf4e1c0e0fc45b3104c7755f032c56953c31",
+    "setAssistedCap": "0x0022004e0f8df3fc53e4f7990e9efb30b601be3d0a039bd633b25991442364a5",
+    "setFanPass": "0x00620065c6958d1357b38be23edc36f98d8091178e1969640e73e366f7080773",
+    "commitSeed": "0x00270042922516e5720e9b025c60e66a3dbf568348882ccb4ba175bab301f599",
+    "openRegistration": "0x005c000091fce9fa1de0b181fca3537c964e1640a2e6beafba52fc82309f1a20"
+  },
+  "aadhaar": {
+    "mode": "real",
+    "acceptedKeyHashes": [
+      "19770349258225098911243612275321727303641256718510179842211794623059325011884",
+      "7217153585153042436745665065617781483037900263075488870028184365042423808319",
+      "18063425702624337643644061197836918910810808173893535653269228433734128853484"
+    ]
+  },
+  "fanPass": {
+    "seed": "140048835112017016673936289914062795875",
+    "groupId": "0",
+    "passScope": "384257016757909189639697366152079955133723793300048315127151900045429498015"
+  },
+  "event": {
+    "name": "Coldplay · Bengaluru · Demo Night",
+    "facePrice": "10000000000000000",
+    "offerWindow": 600,
+    "claimWindow": 1800,
+    "nullifierSeed": "20260118",
+    "seats": {
+      "publicSeats": 8,
+      "sponsorSeats": 2,
+      "holdSeats": 2
+    },
+    "assistedCap": 5,
+    "registrationMinutes": 120,
+    "buybackDays": 7,
+    "inventoryRoot": "0xa20995c0989dd732d6324e1277f47616bdf3592414ad5ea0e4cf86e1738182f9",
+    "seedCommitment": "0x378bee4e927b04058a2151b9c9ae253a4edab5284282e028946c442c4ae13fe7"
+  }
+}
