@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fair Tickets</title>
+<meta name="description" content="Anti-scalping ticketing on Quai: one verified human, one entry, a lottery anyone can verify, and tickets that resell only at face value.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: single column story, problem -> mechanism steps -> on-chain proof -> results -> links */
+:root {
+  --bg: #F5F7FB; --surface: #FFFFFF; --fg: #18203A; --muted: #5B6480; --line: #DCE1EE;
+  --accent: #3D55E8; --accent-soft: #E8ECFF; --accent-fg: #FFFFFF; --good: #138A52; --bad: #C2413A;
+  --display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --body: "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #0F1424; --surface: #171E33; --fg: #E6EAF6; --muted: #9AA3C0; --line: #2A3352;
+  --accent: #8C9CFF; --accent-soft: #232C4D; --accent-fg: #0F1424; --good: #4FD08F; --bad: #FF8A80; color-scheme: dark } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.6 var(--body); }
+.wrap { max-width: 920px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+a { color: var(--accent); }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(34px, 6vw, 54px); line-height: 1.05; }
+h2 { font-size: 26px; line-height: 1.2; }
+h3 { font-size: 18px; }
+p { margin: 0; }
+.eyebrow { font: 600 12px/1 var(--body); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+header.hero { padding-block: 56px 40px; display: flex; flex-direction: column; gap: 18px; }
+.lede { font-size: 19px; color: var(--muted); max-width: 62ch; }
+.ctas { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { display: inline-block; padding: 10px 16px; border-radius: 10px; font-weight: 600; text-decoration: none; border: 1px solid var(--accent); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); }
+.btn.ghost { color: var(--accent); background: transparent; }
+.ticket { margin-top: 8px; display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; background: var(--accent); color: var(--accent-fg);
+  border-radius: 16px; padding: 18px 22px; max-width: 460px; }
+.ticket small { opacity: .8; letter-spacing: .12em; font-weight: 600; font-size: 11px; text-transform: uppercase; }
+.ticket b { font-family: var(--display); font-size: 22px; }
+.ticket .seat { grid-row: span 2; align-self: center; font-family: var(--display); font-size: 34px; font-weight: 700; }
+section { padding-block: 36px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 18px; }
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+.step { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.step .n { font: 700 13px var(--mono); color: var(--accent); }
+.step p { color: var(--muted); font-size: 15px; }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px; }
+.stat .big { font: 700 40px/1 var(--display); font-variant-numeric: tabular-nums; }
+.stat.bad .big { color: var(--bad); } .stat.good .big { color: var(--good); }
+.stat p { color: var(--muted); font-size: 14px; }
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+td.addr a { font-family: var(--mono); font-size: 13px; }
+ul.plain { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.note { color: var(--muted); font-size: 14px; }
+footer { padding-block: 32px 48px; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; display: flex; flex-direction: column; gap: 6px; }
+@media (max-width: 620px) { .compare, .two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <span class="eyebrow">The Chip Architects · Built on Quai</span>
+  <h1>Fair Tickets</h1>
+  <p class="lede">Anti-scalping ticketing where every ticket belongs to one verified human. Fans prove they're real with a zero-knowledge Aadhaar proof, join a lottery anyone can check, and can only resell at face value. No personal data is stored.</p>
+  <div class="ctas">
+    <a class="btn primary" href="https://github.com/suhasr-design/CA_HAKACTHON">Source code on GitHub</a>
+    <a class="btn ghost" href="https://orchard.quaiscan.io/address/0x00656AdF0C007CD7B6e0d089727d26806D1Caebf">Live contract on Quai Orchard</a>
+    <a class="btn ghost" href="https://expo.dev/artifacts/eas/YEbB5Jdyz_hFdIAYzlFClHYmFP0eHRoBKRF56LndR0w.apk">Android fan app (APK)</a>
+  </div>
+  <div class="ticket" aria-label="Example ticket">
+    <small>Admit one · non-transferable</small><span class="seat">C-10</span>
+    <b>RCB UNBOX · ₹4,500</b>
+  </div>
+</header>
+
+<section>
+  <span class="eyebrow">The problem</span>
+  <h2>The fastest bot wins, and fans pay the markup</h2>
+  <p class="lede">When a big match or concert goes on sale, bots and scripted accounts win the queue in minutes. Tickets come back on resale at several times face value. Today's fixes (captchas, KYC, OTPs) collect fans' personal data and still let scalpers through.</p>
+</section>
+
+<section>
+  <span class="eyebrow">How it works</span>
+  <h2>Six rules, enforced by smart contracts</h2>
+  <div class="steps">
+    <div class="step"><span class="n">1 · Verify once</span><h3>One human, one entry</h3><p>The fan scans their offline Aadhaar QR at a kiosk. A zero-knowledge proof, checked against real UIDAI keys, shows they're a unique person without revealing their name, number or photo.</p></div>
+    <div class="step"><span class="n">2 · Fan Pass</span><h3>Book in seconds</h3><p>The one-time proof adds an anonymous pass to a group. Joining any event then takes a light phone proof (about 1–7 s). Each event sees a different code, so fans can't be tracked across events.</p></div>
+    <div class="step"><span class="n">3 · Register</span><h3>No 10 a.m. stampede</h3><p>Registration stays open for a window. Gas is paid for fans, so nobody needs crypto. Fans without a smartphone use an ID desk with a capped quota.</p></div>
+    <div class="step"><span class="n">4 · Draw</span><h3>A lottery anyone can check</h3><p>The organiser commits a secret before registration opens. It's mixed with a future block hash, and an on-chain shuffle orders every entrant. Anyone can recompute it. Seats 1–N win; everyone else is on a numbered waitlist.</p></div>
+    <div class="step"><span class="n">5 · Resale</span><h3>Face value forever</h3><p>Tickets can't be transferred. A fan who can't attend sells back to the contract at face value, and the seat goes to the next person on the waitlist.</p></div>
+    <div class="step"><span class="n">6 · Gate</span><h3>Screenshots don't work</h3><p>The fan's app scans a gate code that changes every 20 seconds and signs it. Copied QRs fail, and a ticket can't enter twice at different gates.</p></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Results</span>
+  <h2>Bot simulation: first-come queue vs Fair Tickets</h2>
+  <div class="compare">
+    <div class="stat bad"><span class="big">76.9%</span><strong>of tickets taken by bots in a first-come queue</strong><p>58 of 1,000 real fans got a ticket.</p></div>
+    <div class="stat good"><span class="big">2.5%</span><strong>of tickets reached bots with Fair Tickets</strong><p>488 of 1,000 real fans got a ticket, about 8× more.</p></div>
+  </div>
+  <p class="note">This is a synthetic model, not a real sale: 500 seats, 1,000 fans, a scalper with 2,000 accounts plus 25 borrowed Aadhaars, 200 trials. Run it yourself with <code>npm run simulate</code>. Separately, 42 contract tests and end-to-end runs pass, and every attack we tested was rejected: forged proofs, double entry, fake or replayed gate QRs, ticket transfers and cross-gate reuse.</p>
+</section>
+
+<section>
+  <span class="eyebrow">On-chain</span>
+  <h2>Deployed on Quai Orchard (Cyprus-1)</h2>
+  <p class="note">7 contracts plus 5 setup transactions, deployed with the quais SDK for about 0.02 test QUAI.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Contract</th><th>Role</th><th>Address</th></tr></thead>
+      <tbody>
+        <tr><td>FairTicketsCommitReveal</td><td>The event: registration, draw, shuffle, claims, buyback, waitlist</td><td class="addr"><a href="https://orchard.quaiscan.io/address/0x00656AdF0C007CD7B6e0d089727d26806D1Caebf">0x00656AdF…Caebf</a></td></tr>
+        <tr><td>FanPass</td><td>Lifetime anonymous pass group</td><td class="addr"><a href="https://orchard.quaiscan.io/address/0x006D6d94bD5c7FEbC8c822D57eE343f60C8DE1A7">0x006D6d94…DE1A7</a></td></tr>
+        <tr><td>AnonAadhaarMultiKey</td><td>Checks Aadhaar proofs against 3 UIDAI keys</td><td class="addr"><a href="https://orchard.quaiscan.io/address/0x0014275f33B2Ac452D9eC554D436150b87018B99">0x0014275f…18B99</a></td></tr>
+        <tr><td>Verifier</td><td>Groth16 verifier for the Aadhaar circuit</td><td class="addr"><a href="https://orchard.quaiscan.io/address/0x000e5c237942D6756007b045E19134B2AA75bc1F">0x000e5c23…5bc1F</a></td></tr>
+        <tr><td>Semaphore</td><td>Per-event anonymous proofs</td><td class="addr"><a href="https://orchard.quaiscan.io/address/0x005f6fC400bc674b0c9CE73f5F9214f3070cB522">0x005f6fC4…cB522</a></td></tr>
+        <tr><td>SemaphoreVerifier</td><td>Verifies Fan Pass proofs</td><td class="addr"><a href="https://orchard.quaiscan.io/address/0x00289e8aAf663f1CCE1F2B0BFD833A6d19cfc306">0x00289e8a…fc306</a></td></tr>
+        <tr><td>PoseidonT3</td><td>Hash library for the pass group</td><td class="addr"><a href="https://orchard.quaiscan.io/address/0x0044c69f92e34e76491527e69A526191ae8ffc8a">0x0044c69f…ffc8a</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Transparency</span>
+  <h2>What's real and what's a demo</h2>
+  <div class="two">
+    <div class="box"><h3>Real</h3><ul class="plain">
+      <li>All contract logic, live on Quai Orchard testnet</li>
+      <li>Anon Aadhaar verification with real UIDAI public keys</li>
+      <li>Fan Pass, committed seat map, shuffle, buyback and waitlist</li>
+      <li>Rotating gate codes and cross-gate duplicate checks</li>
+    </ul></div>
+    <div class="box"><h3>Demo or not yet done</h3><ul class="plain">
+      <li>The live stage demo runs on a local copy of the chain so it can be reset</li>
+      <li>Synthetic crowd accounts, labelled on screen</li>
+      <li>The bot numbers come from a simulation</li>
+      <li>Not yet: security audit, mainnet, explorer source verification</li>
+    </ul></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Team</span>
+  <h2>The Chip Architects</h2>
+  <p>Suhas R (Designer) · Shashikumar N R (Strategist) · Srujan C (Researcher) · Sudarshan S R (Flaw Identifier)</p>
+  <p class="note">Docs: <a href="https://github.com/suhasr-design/CA_HAKACTHON/blob/main/README.md">README</a> · <a href="https://github.com/suhasr-design/CA_HAKACTHON/blob/main/PRESENTER_GUIDE.md">Presenter guide</a></p>
+</section>
+
+<footer>
+  <span>Fair Tickets · SpeedRun Hackathon #1 on Quai · Testnet prototype, not a production service.</span>
+  <span>No personal data is collected by this page or stored on-chain.</span>
+</footer>
+
+</div>
+</body>
+</html>
